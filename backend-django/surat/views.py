@@ -9,6 +9,7 @@ from drf_spectacular.utils import extend_schema
 
 from .models import SuratType, SuratRequest, SuratApproval, TteSignature
 from accounts.models import Student, Lecturer
+from accounts.serializers import StandardErrorResponseSerializer 
 
 from .serializers import (
     SuratTypeSerializer,
@@ -30,8 +31,7 @@ class SuratTypeListAPIView(ListAPIView):
     """
     queryset = SuratType.objects.all()
     serializer_class = SuratTypeSerializer
-    permission_classes = [permissions.Allowauthenticated_or_read_only if hasattr(permissions, 'Allowauthenticated_or_read_only') else permissions.AllowAny]
-
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly] 
 
 class SuratRequestCreateAPIView(APIView):
     """
