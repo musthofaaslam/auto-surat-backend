@@ -22,7 +22,7 @@ from .serializers import (
     SuratRequestSuccessResponseSerializer
 )
 from .services.workflow_service import process_surat_request, process_approval_action
-from .accounts.serializers import StandardErrorResponseSerializer
+from accounts.serializers import StandardErrorResponseSerializer
 
 class SuratTypeListAPIView(ListAPIView):
     """
