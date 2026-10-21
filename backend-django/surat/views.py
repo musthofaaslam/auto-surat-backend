@@ -319,8 +319,7 @@ class SuratTypeListAPIView(ListAPIView):
     """
     queryset = SuratType.objects.all()
     serializer_class = SuratTypeSerializer
-    permission_classes = [permissions.Allowauthenticated_or_read_only if hasattr(permissions, 'Allowauthenticated_or_read_only') else permissions.AllowAny]
-
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly] 
 
 class SuratRequestCreateAPIView(APIView):
     """
@@ -811,6 +810,4 @@ class SuratVerifyAPIView(APIView):
                 "penandatangan": tte_sig.signer.user.nama if tte_sig.signer else "Sistem Otomatis Kampus",
                 "tanggal_ttd": tte_sig.created_at
             }
-        }, status=status.HTTP_200_OK)
-
         }, status=status.HTTP_200_OK)
