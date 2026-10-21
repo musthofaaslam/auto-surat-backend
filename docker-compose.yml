@@ -1,17 +1,5 @@
 version: '3.8'
 services:
-  postgres:
-    image: postgres:15
-    container_name: postgres_db
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT}:5432"
-
   backend-django:
     build: ./backend-django
     container_name: django_app
@@ -22,8 +10,4 @@ services:
     env_file:
       - .env
     command: uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --reload
-    depends_on:
-      - postgres
-
-volumes:
-  postgres_data:
+    
