@@ -174,3 +174,29 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'AutoSurat Backend & Agentic AI API',
+    'DESCRIPTION': 'Dokumentasi API sistem pembuatan surat resmi otomatis dan orkestrasi Agentic AI Level 2.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'ENUM_NAME_OVERRIDES': {
+        'SuratRequestStatusEnum': 'surat.models.SuratRequest.Status',
+        'SuratApprovalStatusEnum': 'surat.models.SuratApproval.Status',
+    },
+}
+
+# SARAN PERBAIKAN ARSITEKTURAL:
+# 1. Ekspos variabel lingkungan LLM (`GEMINI_API_KEY` dengan fallback ke `GOOGLE_API_KEY`)
+#    secara terpusat di `settings.py` agar `SuratDraftingAgent` tidak melakukan pembacaan
+#    `os.environ` secara tersebar di lapisan bisnis.
+# 2. Sediakan parameter operasional agen (`GEMINI_MODEL_NAME`, `AGENT_CRITIQUE_MIN_SCORE`,
+#    `AGENT_MAX_REVISIONS`, `AGENT_TIMEOUT_SECONDS`) sebagai konstanta konfigurasi
+#    agar batas evaluasi Self-Reflection dan timeout jaringan dapat disesuaikan per environment
+#    tanpa memodifikasi kode sumber agen.
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY', '')
+GEMINI_MODEL_NAME = os.environ.get('GEMINI_MODEL_NAME', 'gemini-3.1-flash-lite')
+AGENT_CRITIQUE_MIN_SCORE = int(os.environ.get('AGENT_CRITIQUE_MIN_SCORE', '8'))
+AGENT_MAX_REVISIONS = int(os.environ.get('AGENT_MAX_REVISIONS', '1'))
+AGENT_TIMEOUT_SECONDS = float(os.environ.get('AGENT_TIMEOUT_SECONDS', '30.0'))
+REQUIRED_FIELD_SURAT_PATH = BASE_DIR / 'required_field_surat.json'

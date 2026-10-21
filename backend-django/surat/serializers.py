@@ -1,4 +1,4 @@
-# apps/surat/serializers.py
+import json
 from rest_framework import serializers
 from .models import (
     SuratType,
@@ -10,17 +10,40 @@ from .models import (
 )
 from .services.validators import run_validators
 
-# ==============================================================================
-# 1. SERIALIZERS UNTUK INPUT (WRITE / CREATE / ACTION)
-# ==============================================================================
+# SARAN PERBAIKAN ARSITEKTURAL:
+# 1. Pisahkan kontrak serializer untuk skema dokumentasi OpenAPI (`drf-spectacular`)
+#    secara tegas agar setiap endpoint `APIView` memiliki definisi request dan response
+#    yang tervalidasi tanpa memicu error `unable to guess serializer`.
+# 2. `SuratRequestCreateSerializer` mendukung alur Agentic AI Fase 1 melalui atribut
+#    `user_prompt_context` (serta alias `konteks`), sehingga validasi sinkron tidak memblokir
+#    permohonan berbasis bahasa alami sebelum `SuratDraftingAgent` mengekstrak `payload_data`
+#    di latar belakang.
+# 3. `SuratApprovalActionSerializer` dan `LecturerApprovalActionRequestSerializer`
+#    menerima koreksi `final_approved_content` serta pilihan `final_status` (`SENT` / `PRINTED`)
+#    dari Dosen/Pejabat saat menyetujui draf yang berstatus `PENDING_APPROVAL`.
+
 
 class SuratRequestCreateSerializer(serializers.Serializer):
     """
     Serializer khusus untuk VALIDASI input saat mahasiswa mengajukan surat baru.
-    Menerima kode_surat, payload JSON dinamis, dan file lampiran (attachments).
+    Menerima kode_surat, konteks bahasa alami (user_prompt_context / konteks),
+    payload JSON dinamis opsional, dan file lampiran (attachments).
     """
     kode_surat = serializers.CharField(max_length=50)
-    payload_data = serializers.JSONField(default=dict)
+    user_prompt_context = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Konteks permohonan surat dalam bahasa alami untuk diproses oleh SuratDraftingAgent.",
+    )
+    konteks = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        write_only=True,
+        help_text="Alias opsional untuk konteks permohonan surat.",
+    )
+    payload_data = serializers.JSONField(default=dict, required=False)
     attachments = serializers.ListField(
         child=serializers.FileField(),
         required=False,
@@ -29,36 +52,61 @@ class SuratRequestCreateSerializer(serializers.Serializer):
 
     def validate(self, data):
         kode_surat = data.get('kode_surat')
-        payload = data.get('payload_data', {})
-        
-        # 1. Ambil konfigurasi SuratType dari database berdasarkan kode_surat
-        try:
-            surat_type = SuratType.objects.get(kode_surat=kode_surat)
-        except SuratType.DoesNotExist:
-            raise serializers.ValidationError(f"Jenis surat dengan kode '{kode_surat}' tidak ditemukan.")
+        raw_payload = data.get('payload_data')
 
-        required_fields = surat_type.required_payload_fields 
-        missing_fields = []
+        prompt_candidates = [
+            data.get('user_prompt_context'),
+            data.get('konteks'),
+        ]
+        if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict):
+            prompt_candidates.extend([
+                self.initial_data.get('prompt'),
+                self.initial_data.get('context'),
+            ])
 
-        for field_config in required_fields:
-            # Ambil nama key-nya dari dictionary (misal: 'tujuan_keperluan')
-            field_key = field_config.get('field') if isinstance(field_config, dict) else field_config
-            
-            # Cek apakah key tersebut ada di payload dan tidak kosong
-            if field_key not in payload or not payload.get(field_key):
-                missing_fields.append(field_key)
-
-        if missing_fields:
+        if isinstance(raw_payload, str) and raw_payload.strip():
+            prompt_candidates.append(raw_payload.strip())
+            payload = {}
+        elif isinstance(raw_payload, dict):
+            payload = dict(raw_payload)
+            for key_alias in ('user_prompt_context', 'konteks', 'prompt', 'context'):
+                alias_val = payload.get(key_alias)
+                if isinstance(alias_val, str) and alias_val.strip():
+                    prompt_candidates.append(alias_val.strip())
+        elif raw_payload is None:
+            payload = {}
+        else:
             raise serializers.ValidationError({
-                "payload_data": f"Field berikut wajib diisi: {', '.join(missing_fields)}"
+                "payload_data": "Format payload_data harus berupa objek JSON (dictionary)."
             })
-        # 3. Ambil object request dan profil mahasiswa
+
+        resolved_prompt = next(
+            (item.strip() for item in prompt_candidates if isinstance(item, str) and item.strip()),
+            ""
+        )
+
+        # Apabila user tidak mengirim prompt eksplisit tetapi mengirim atribut di payload_data,
+        # sintesiskan konteks teks dari payload_data agar SuratDraftingAgent tetap dapat bekerja.
+        if not resolved_prompt and payload:
+            resolved_prompt = json.dumps(payload, ensure_ascii=True)
+
+        if not resolved_prompt:
+            raise serializers.ValidationError({
+                "user_prompt_context": (
+                    "Konteks permohonan surat (user_prompt_context / konteks) atau "
+                    "payload_data wajib diisi."
+                )
+            })
+
+        data['user_prompt_context'] = resolved_prompt
+        data['payload_data'] = payload
+
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError("Autentikasi diperlukan untuk mengajukan surat.")
 
         user = request.user
-        try:
+        if hasattr(user, 'student_profile'):
             student_profile = user.student_profile
             student_data = {
                 "nim": student_profile.nim,
@@ -71,40 +119,47 @@ class SuratRequestCreateSerializer(serializers.Serializer):
                 "status_disiplin_kampus": student_profile.status_disiplin_kampus,
                 "status_beasiswa_aktif": student_profile.status_beasiswa_aktif,
                 "nama_beasiswa_aktif": student_profile.nama_beasiswa_aktif,
-                "prodi": student_profile.prodi.nama_prodi, 
-                "fakultas": student_profile.fakultas.nama_fakultas
+                "prodi": student_profile.prodi.nama_prodi,
+                "fakultas": student_profile.fakultas.nama_fakultas,
             }
-        except AttributeError:
-            raise serializers.ValidationError("Akun ini tidak memiliki profil mahasiswa yang valid.")
 
-        # 4. Ambil data KRS/mata kuliah jika dibutuhkan
-        student_courses_data = list(
-            student_profile.courses_taken.values("student_id","course_id", "semester_taken", "status_krs")
-        )
+            student_courses_data = list(
+                student_profile.courses_taken.values(
+                    "student_id", "course_id", "semester_taken", "status_krs"
+                )
+            )
 
-        # 5. Jalankan validator bisnis (Global Check + Specific Check)
-        run_validators(
-            kode_surat=kode_surat,
-            student_data=student_data,
-            payload=payload,
-            student_courses_data=student_courses_data
-        )
+            run_validators(
+                kode_surat=kode_surat,
+                student_data=student_data,
+                payload=payload,
+                student_courses_data=student_courses_data,
+            )
 
         return data
 
+
 class SuratApprovalActionSerializer(serializers.Serializer):
-    """Serializer untuk input catatan opsional saat Dosen melakukan APPROVE"""
+    """Serializer untuk input catatan opsional dan teks final saat Dosen melakukan APPROVE"""
     catatan = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    final_approved_content = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Naskah surat final yang telah ditinjau atau disunting oleh Dosen/Pejabat.",
+    )
+    final_status = serializers.ChoiceField(
+        choices=["SENT", "PRINTED"],
+        required=False,
+        default="SENT",
+        help_text="Status akhir surat setelah eksekusi TTE dan PDF selesai ('SENT' atau 'PRINTED').",
+    )
 
 
 class SuratRejectActionSerializer(serializers.Serializer):
     """Serializer untuk input alasan wajib saat Dosen melakukan REJECT"""
     alasan_penolakan = serializers.CharField(required=True, allow_blank=False)
 
-
-# ==============================================================================
-# 2. SERIALIZERS UNTUK OUTPUT (READ / RESPONSE / DETAIL)
-# ==============================================================================
 
 class SuratTypeSerializer(serializers.ModelSerializer):
     """Serializer output untuk master data jenis surat (misal untuk pilihan dropdown frontend)"""
@@ -180,7 +235,7 @@ class SuratRequestListSerializer(serializers.ModelSerializer):
 
 class SuratRequestDetailSerializer(serializers.ModelSerializer):
     """
-    Serializer output detail lengkap berikut seluruh relasi bersarang (nested) 
+    Serializer output detail lengkap berikut seluruh relasi bersarang (nested)
     seperti lampiran, timeline approval, TTE, dan audit logs.
     """
     nama_surat = serializers.CharField(source='kode_surat.nama_surat', read_only=True)
@@ -188,8 +243,7 @@ class SuratRequestDetailSerializer(serializers.ModelSerializer):
     nim_mahasiswa = serializers.CharField(source='student.nim', read_only=True)
     prodi_mahasiswa = serializers.CharField(source='student.prodi.nama_prodi', read_only=True)
     fakultas_mahasiswa = serializers.CharField(source='student.fakultas.nama_fakultas', read_only=True)
-    
-    # Nested relasi menggunakan related_name dari models_3.py kita
+
     attachments = SuratAttachmentSerializer(many=True, read_only=True)
     approvals = SuratApprovalSerializer(many=True, read_only=True)
     signatures = TteSignatureSerializer(many=True, read_only=True)
@@ -208,6 +262,11 @@ class SuratRequestDetailSerializer(serializers.ModelSerializer):
             'nomor_surat_resmi',
             'status',
             'payload_data',
+            'user_prompt_context',
+            'ai_original_draft',
+            'final_approved_content',
+            'self_critique_score',
+            'revision_notes',
             'file_pdf_url',
             'qr_verification_code',
             'created_at',
@@ -216,9 +275,115 @@ class SuratRequestDetailSerializer(serializers.ModelSerializer):
             'signatures',
             'audit_logs'
         ]
-        
-# serializers.py
+
+
 class SuratRequestSuccessResponseSerializer(serializers.Serializer):
     status = serializers.CharField(default="success")
     message = serializers.CharField(default="Pengajuan surat berhasil dibuat.")
     data = serializers.DictField(default={"request_id": 123, "nomor_surat": "B/123/UNIV/2026"})
+
+
+class LecturerApprovalActionRequestSerializer(serializers.Serializer):
+    """
+    Serializer skema request terpadu untuk aksi APPROVE atau REJECT oleh Dosen/Pejabat.
+    """
+    action = serializers.ChoiceField(
+        choices=["APPROVE", "REJECT"],
+        required=True,
+        help_text="Tindakan persetujuan: 'APPROVE' atau 'REJECT'.",
+    )
+    catatan = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Catatan opsional saat melakukan APPROVE.",
+    )
+    final_approved_content = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Naskah surat final hasil tinjauan atau koreksi Dosen/Pejabat saat APPROVE.",
+    )
+    final_status = serializers.ChoiceField(
+        choices=["SENT", "PRINTED"],
+        required=False,
+        default="SENT",
+        help_text="Status distribusi akhir surat setelah PDF dan TTE diterbitkan ('SENT' atau 'PRINTED').",
+    )
+    alasan_penolakan = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Alasan penolakan (wajib diisi apabila action bernilai 'REJECT').",
+    )
+
+
+class LecturerApprovalActionResponseSerializer(serializers.Serializer):
+    """
+    Serializer skema response sukses saat Dosen melakukan APPROVE atau REJECT.
+    """
+    message = serializers.CharField(
+        default="Persetujuan final selesai. Surat resmi berhasil diterbitkan!"
+    )
+    nomor_surat_resmi = serializers.CharField(
+        required=False,
+        allow_null=True,
+        default="B/123/UNIV/2026",
+    )
+    file_pdf_url = serializers.URLField(
+        required=False,
+        allow_null=True,
+        default="https://res.cloudinary.com/demo/image/upload/surat.pdf",
+    )
+
+
+class ApprovalActionErrorResponseSerializer(serializers.Serializer):
+    """
+    Serializer skema response error pada aksi persetujuan surat.
+    """
+    error = serializers.CharField(
+        default="Anda tidak memiliki hak akses untuk menyetujui antrean ini."
+    )
+
+
+class VerifiedSuratDetailSerializer(serializers.Serializer):
+    nomor_surat_resmi = serializers.CharField(allow_null=True)
+    jenis_surat = serializers.CharField()
+    kategori = serializers.CharField()
+    tanggal_terbit = serializers.DateTimeField()
+
+
+class VerifiedMahasiswaSerializer(serializers.Serializer):
+    nim = serializers.CharField()
+    nama = serializers.CharField()
+    prodi = serializers.CharField()
+    fakultas = serializers.CharField()
+
+
+class VerifiedTteInfoSerializer(serializers.Serializer):
+    hash_sha256 = serializers.CharField()
+    penandatangan = serializers.CharField()
+    tanggal_ttd = serializers.DateTimeField()
+
+
+class SuratVerifyValidResponseSerializer(serializers.Serializer):
+    """
+    Serializer skema response publik saat token QR Code / TTE dinyatakan VALID.
+    """
+    status = serializers.CharField(default="VALID")
+    message = serializers.CharField(
+        default="Dokumen Surat ASLI dan terdaftar secara resmi di sistem kampus."
+    )
+    detail_surat = VerifiedSuratDetailSerializer()
+    mahasiswa = VerifiedMahasiswaSerializer()
+    tte_info = VerifiedTteInfoSerializer()
+
+
+class SuratVerifyInvalidResponseSerializer(serializers.Serializer):
+    """
+    Serializer skema response publik saat token QR Code / TTE tidak ditemukan (INVALID).
+    """
+    status = serializers.CharField(default="INVALID")
+    message = serializers.CharField(
+        default="Dokumen Surat TIDAK VALID atau palsu. Token verifikasi tidak ditemukan di sistem."
+    )

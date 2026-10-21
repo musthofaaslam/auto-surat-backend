@@ -30,3 +30,8 @@ ehthumbs.db
 # --- Docker & Logs ---
 *.log
 docker-data/
+
+# --- Agentic AI Local Verification Scripts ---
+surat/agents/verify_stage*.py
+backend-django/surat/agents/verify_stage*.py
+**/surat/agents/verify_stage*.py
