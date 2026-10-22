@@ -62,9 +62,7 @@ def verify_scholarship_eligibility(student_data, minimum_gpa=3.25):
         return False, f"Pengajuan ditolak: IPK ({ipk}) belum memenuhi syarat minimum ({minimum_gpa})."
     
     if ada_pelanggaran:
-        
-        
-     False, "Pengajuan ditolak: Mahasiswa memiliki catatan pelanggaran etik."
+        return False, "Pengajuan ditolak: Mahasiswa memiliki catatan pelanggaran etik."
 
     return True, "Memenuhi syarat akademik dan kedisiplinan beasiswa."
 
