@@ -28,6 +28,12 @@ class LoginAPIView(APIView):
     )
     
     def post(self, request):
+        print("--- DEBUG ISI REQUEST ---")
+        print("BODY MENTAH (data):", request.body)
+        print("PARSED DATA (request.data):", request.data)
+        print("CONTENT-TYPE:", request.META.get('CONTENT_TYPE'))
+        print("---------------------------")
+        # ----------------------------------------
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
             return Response({
