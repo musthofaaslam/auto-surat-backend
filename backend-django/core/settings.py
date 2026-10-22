@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY') or os.environ.get('DjANGO_SECRET_KEY', 'django-insecure-autosurat-dev-secret-key-9988776655')
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 ALLOWED_HOSTS = ['auto-surat-backend-1.onrender.com', 'auto-surat-backend.onrender.com','localhost', '127.0.0.1']
 # Application definition
@@ -79,9 +79,18 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
+db_url = os.environ.get('DATABASE_URL')
+if not db_url and os.environ.get('POSTGRES_DB'):
+    db_user = os.environ.get('POSTGRES_USER', 'postgres')
+    db_password = os.environ.get('POSTGRES_PASSWORD', 'postgres_password_lokal')
+    db_host = os.environ.get('POSTGRES_HOST', 'postgres')
+    db_port = os.environ.get('POSTGRES_PORT', '5432')
+    db_name = os.environ.get('POSTGRES_DB', 'autosurat_db')
+    db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
 DATABASES = {
     'default': dj_database_url.config(
-        default=os.environ.get('DATABASE_URL'),
+        default=db_url,
         conn_max_age=600,
         # conn_health_checks_enabled=True,
     )
