@@ -24,6 +24,7 @@ from surat.agents.schemas import (
     SelfEvaluationSchema,
     SuratMagangPayloadSchema,
     build_dynamic_payload_schema,
+    create_dynamic_agent_output_schema,
 )
 
 # SARAN PERBAIKAN ARSITEKTURAL:
@@ -191,12 +192,22 @@ class SuratDraftingAgent:
         )
         return self._client
 
-    def get_required_fields_for_kode(self, kode_surat: str) -> List[Dict[str, str]]:
+    def get_required_fields_for_kode(self, kode_surat: str, dynamic_fields_dict: Optional[Dict[str, str]] = None) -> List[Dict[str, str]]:
         """
         Mengambil aturan field dari `required_field_surat.json` berdasarkan `kode_surat`.
         Mendukung struktur JSON berupa pemetaan per `kode_surat` (dict) maupun daftar
         spesifikasi kanonik langsung (list).
         """
+        if dynamic_fields_dict and isinstance(dynamic_fields_dict, dict):
+            formatted_fields = []
+            for field_name, field_desc in dynamic_fields_dict.items():
+                formatted_fields.append({
+                    "field": field_name,
+                    "type": "string",
+                    "description": str(field_desc)
+                })
+            return formatted_fields
+        
         normalized_kode = (kode_surat or "").strip().upper()
         if not normalized_kode:
             raise SuratAgentConfigurationError(

@@ -170,3 +170,16 @@ def build_dynamic_payload_schema(
         __config__=ConfigDict(extra="forbid", str_strip_whitespace=True),
         **field_definitions,
     )
+    
+def create_dynamic_agent_output_schema(dynamic_payload_schema: Type[BaseModel]) -> Type[BaseModel]:
+    """
+    Factory untuk membungkus payload dinamis ke dalam struktur output utama agen
+    beserta evaluasi diri (Self-Reflection).
+    """
+    return create_model(
+        "DynamicAgentSuratDraftOutputSchema",
+        __config__=ConfigDict(extra="forbid", str_strip_whitespace=True),
+        extracted_payload=(dynamic_payload_schema, Field(..., description="Data atribut terstruktur dinamis.")),
+        ai_original_draft=(str, Field(..., min_length=50, description="Naskah draf surat formal utuh.")),
+        evaluation=(SelfEvaluationSchema, Field(..., description="Hasil evaluasi internal agen.")),
+    )

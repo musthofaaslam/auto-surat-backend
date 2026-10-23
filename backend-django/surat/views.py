@@ -443,6 +443,8 @@ class SuratRequestCreateAPIView(APIView):
             "semester_aktif": student_obj.semester_aktif,
             "tahun_akademik": student_obj.tahun_akademik,
         }
+        # Ambil field dinamis yang tersimpan di kolom/atribut jenis surat (sesuaikan nama field modelnya, misal: required_fields_dict)
+        dynamic_fields_dict = getattr(surat_type, "required_fields_dict", None)
 
         worker_thread = threading.Thread(
             target=_execute_drafting_agent_worker,
@@ -452,6 +454,7 @@ class SuratRequestCreateAPIView(APIView):
                 "kode_surat": surat_type.kode_surat,
                 "student_metadata": student_metadata,
                 "agent": self.get_drafting_agent(),
+                "dynamic_fields_dict": dynamic_fields_dict, # <-- Teruskan data dinamis ke worker
             },
             name=f"surat-drafting-agent-{surat_req.id}",
             daemon=True,
