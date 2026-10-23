@@ -273,8 +273,8 @@ class SuratDraftingAgent:
         canonical_fields = set(SuratMagangPayloadSchema.model_fields.keys())
         requested_fields = {item["field"] for item in required_fields}
 
-        if requested_fields == canonical_fields:
-            return AgentSuratDraftOutputSchema
+        # if requested_fields == canonical_fields:
+        #     return AgentSuratDraftOutputSchema
 
         normalized_kode = "".join(ch for ch in kode_surat.upper() if ch.isalnum()) or "Custom"
         dynamic_payload_model = build_dynamic_payload_schema(
