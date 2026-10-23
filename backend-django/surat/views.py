@@ -118,6 +118,7 @@ def _execute_drafting_agent_worker(
     kode_surat: str,
     student_metadata: Optional[Dict[str, Any]] = None,
     agent: Optional[SuratDraftingAgent] = None,
+    dynamic_fields_dict: Optional[Dict[str, Any]] = None
 ) -> None:
     """
     Worker asinkron untuk menjalankan SuratDraftingAgent.draft_letter() di latar belakang.
