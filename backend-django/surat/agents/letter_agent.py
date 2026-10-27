@@ -20,9 +20,9 @@ from surat.agents.prompts import (
     build_system_prompt,
 )
 from surat.agents.schemas import (
-    AgentSuratDraftOutputSchema,
+    # AgentSuratDraftOutputSchema,
     SelfEvaluationSchema,
-    SuratMagangPayloadSchema,
+    # SuratMagangPayloadSchema,
     build_dynamic_payload_schema,
     create_dynamic_agent_output_schema,
 )
@@ -263,7 +263,7 @@ class SuratDraftingAgent:
 
     def resolve_output_schema(
         self, kode_surat: str, required_fields: List[Dict[str, str]]
-    ) -> Type[AgentSuratDraftOutputSchema]:
+    ) -> Type[BaseModel]:
         """
         Menentukan skema Pydantic yang akan diikat ke fitur Structured Outputs LLM.
         Menggunakan `AgentSuratDraftOutputSchema` secara langsung apabila definisi field
@@ -567,7 +567,7 @@ class SuratDraftingAgent:
         kode_surat: str,
         student_metadata: Optional[Dict[str, Any]] = None,
         style_rules: Optional[List[str]] = None,
-    ) -> AgentSuratDraftOutputSchema:
+    ) -> BaseModel:
         """
         Menjalankan alur penyusunan draf surat (Fase 1) beserta mekanisme Self-Reflection:
         1. Memuat spesifikasi field dari `required_field_surat.json` berdasarkan `kode_surat`.
@@ -607,7 +607,7 @@ class SuratDraftingAgent:
             kode_surat,
             self.model_name,
         )
-        first_draft: AgentSuratDraftOutputSchema = self._invoke_structured_llm(
+        first_draft: BaseModel = self._invoke_structured_llm(
             system_prompt=system_prompt,
             user_prompt=initial_user_prompt,
             response_schema=output_schema,
@@ -640,7 +640,7 @@ class SuratDraftingAgent:
             required_fields=required_fields,
         )
 
-        revised_draft: AgentSuratDraftOutputSchema = self._invoke_structured_llm(
+        revised_draft: BaseModel = self._invoke_structured_llm(
             system_prompt=system_prompt,
             user_prompt=revision_user_prompt,
             response_schema=output_schema,
@@ -659,7 +659,7 @@ class SuratDraftingAgent:
         kode_surat: str,
         student_metadata: Optional[Dict[str, Any]] = None,
         style_rules: Optional[List[str]] = None,
-    ) -> AgentSuratDraftOutputSchema:
+    ) -> BaseModel:
         """Alias eksekusi utama yang memanggil `draft_letter`."""
         return self.draft_letter(
             user_prompt_context=user_prompt_context,
