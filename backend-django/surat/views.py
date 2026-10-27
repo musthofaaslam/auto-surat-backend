@@ -373,21 +373,21 @@ class SuratRequestCreateAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         # ndwfevirc kwc
-        # raw_kode_surat = request.data.get("kode_surat")
-        # if isinstance(raw_kode_surat, str) and raw_kode_surat.strip():
-        #     try:
-        #         surat_type = SuratType.objects.get(kode_surat=raw_kode_surat.strip())
-        #     except SuratType.DoesNotExist:
-        #         return Response(
-        #             {
-        #                 "status": "error",
-        #                 "message": "Validasi gagal",
-        #                 "errors": "Jenis surat tidak ditemukan.",
-        #             },
-        #             status=status.HTTP_404_NOT_FOUND,
-        #         )
-        # else:
-        #     surat_type = None
+        raw_kode_surat = request.data.get("kode_surat")
+        if isinstance(raw_kode_surat, str) and raw_kode_surat.strip():
+            try:
+                surat_type = SuratType.objects.get(kode_surat=raw_kode_surat.strip())
+            except SuratType.DoesNotExist:
+                return Response(
+                    {
+                        "status": "error",
+                        "message": "Validasi gagal",
+                        "errors": "Jenis surat tidak ditemukan.",
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        else:
+            surat_type = None
 
         serializer = SuratRequestCreateSerializer(
             data=request.data,
