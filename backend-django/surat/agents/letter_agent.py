@@ -270,8 +270,8 @@ class SuratDraftingAgent:
         identik dengan `SuratMagangPayloadSchema`, atau membangun skema dinamis turunan
         jika terdapat variasi field untuk `kode_surat` tertentu.
         """
-        canonical_fields = set(SuratMagangPayloadSchema.model_fields.keys())
-        requested_fields = {item["field"] for item in required_fields}
+        # canonical_fields = set(SuratMagangPayloadSchema.model_fields.keys())
+        # requested_fields = {item["field"] for item in required_fields}
 
         # if requested_fields == canonical_fields:
         #     return AgentSuratDraftOutputSchema

@@ -9,58 +9,58 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 #    karena sangat efektif memisahkan konteks ekstraksi data dan refleksi diri pada LLM.
 
 
-class SuratMagangPayloadSchema(BaseModel):
-    """
-    Kontrak data dasar berdasarkan `required_field_surat.json` untuk jenis surat
-    observasi atau magang.
-    """
+# class SuratMagangPayloadSchema(BaseModel):
+#     """
+#     Kontrak data dasar berdasarkan `required_field_surat.json` untuk jenis surat
+#     observasi atau magang.
+#     """
 
-    model_config = ConfigDict(
-        extra="forbid",
-        str_strip_whitespace=True,
-    )
+#     model_config = ConfigDict(
+#         extra="forbid",
+#         str_strip_whitespace=True,
+#     )
 
-    instansi_tujuan: str = Field(
-        ...,
-        min_length=3,
-        max_length=255,
-        description="Nama resmi instansi atau perusahaan yang menerima surat.",
-    )
-    tujuan_keperluan: str = Field(
-        ...,
-        min_length=5,
-        max_length=500,
-        description="Tujuan spesifik penggunaan surat secara formal.",
-    )
-    posisi_dilamar: str = Field(
-        ...,
-        min_length=2,
-        max_length=150,
-        description="Posisi atau divisi magang yang dituju.",
-    )
-    tanggal_mulai: date = Field(
-        ...,
-        description="Tanggal mulai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
-    )
-    tanggal_selesai: date = Field(
-        ...,
-        description="Tanggal selesai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
-    )
+#     instansi_tujuan: str = Field(
+#         ...,
+#         min_length=3,
+#         max_length=255,
+#         description="Nama resmi instansi atau perusahaan yang menerima surat.",
+#     )
+#     tujuan_keperluan: str = Field(
+#         ...,
+#         min_length=5,
+#         max_length=500,
+#         description="Tujuan spesifik penggunaan surat secara formal.",
+#     )
+#     posisi_dilamar: str = Field(
+#         ...,
+#         min_length=2,
+#         max_length=150,
+#         description="Posisi atau divisi magang yang dituju.",
+#     )
+#     tanggal_mulai: date = Field(
+#         ...,
+#         description="Tanggal mulai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
+#     )
+#     tanggal_selesai: date = Field(
+#         ...,
+#         description="Tanggal selesai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
+#     )
 
-    @field_validator("instansi_tujuan", "tujuan_keperluan", "posisi_dilamar")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        if not value or not value.strip():
-            raise ValueError("Atribut teks wajib diisi dan tidak boleh hanya berisi spasi kosong.")
-        return value
+#     @field_validator("instansi_tujuan", "tujuan_keperluan", "posisi_dilamar")
+#     @classmethod
+#     def validate_non_empty_text(cls, value: str) -> str:
+#         if not value or not value.strip():
+#             raise ValueError("Atribut teks wajib diisi dan tidak boleh hanya berisi spasi kosong.")
+#         return value
 
-    @model_validator(mode="after")
-    def validate_date_chronology(self) -> "SuratMagangPayloadSchema":
-        if self.tanggal_selesai < self.tanggal_mulai:
-            raise ValueError(
-                "Atribut tanggal_selesai tidak boleh lebih awal daripada tanggal_mulai."
-            )
-        return self
+#     @model_validator(mode="after")
+#     def validate_date_chronology(self) -> "SuratMagangPayloadSchema":
+#         if self.tanggal_selesai < self.tanggal_mulai:
+#             raise ValueError(
+#                 "Atribut tanggal_selesai tidak boleh lebih awal daripada tanggal_mulai."
+#             )
+#         return self
 
 
 class SelfEvaluationSchema(BaseModel):
@@ -95,45 +95,45 @@ class SelfEvaluationSchema(BaseModel):
         return self
 
 
-class AgentSuratDraftOutputSchema(BaseModel):
-    """
-    Skema Structured Output utama yang dikembalikan oleh Surat Agent pada Fase 1.
-    """
+# class AgentSuratDraftOutputSchema(BaseModel):
+#     """
+#     Skema Structured Output utama yang dikembalikan oleh Surat Agent pada Fase 1.
+#     """
 
-    model_config = ConfigDict(
-        extra="forbid",
-        str_strip_whitespace=True,
-    )
+#     model_config = ConfigDict(
+#         extra="forbid",
+#         str_strip_whitespace=True,
+#     )
 
-    extracted_payload: SuratMagangPayloadSchema = Field(
-        ...,
-        description="Data atribut terstruktur yang diekstrak dari konteks pengguna.",
-    )
-    ai_original_draft: str = Field(
-        ...,
-        min_length=50,
-        description="Naskah draf surat formal utuh yang disusun oleh agen.",
-    )
-    evaluation: SelfEvaluationSchema = Field(
-        ...,
-        description="Hasil evaluasi internal agen terhadap draf yang baru disusun.",
-    )
+#     # extracted_payload: SuratMagangPayloadSchema = Field(
+#     #     ...,
+#     #     description="Data atribut terstruktur yang diekstrak dari konteks pengguna.",
+#     # )
+#     ai_original_draft: str = Field(
+#         ...,
+#         min_length=50,
+#         description="Naskah draf surat formal utuh yang disusun oleh agen.",
+#     )
+#     evaluation: SelfEvaluationSchema = Field(
+#         ...,
+#         description="Hasil evaluasi internal agen terhadap draf yang baru disusun.",
+#     )
 
-    def to_payload_dict(self) -> Dict[str, Any]:
-        """
-        Mengekstrak dictionary murni yang siap disimpan ke kolom `SuratRequest.payload_data`.
-        """
-        return {
-            "instansi_tujuan": self.extracted_payload.instansi_tujuan,
-            "tujuan_keperluan": self.extracted_payload.tujuan_keperluan,
-            "posisi_dilamar": self.extracted_payload.posisi_dilamar,
-            "tanggal_mulai": self.extracted_payload.tanggal_mulai.isoformat(),
-            "tanggal_selesai": self.extracted_payload.tanggal_selesai.isoformat(),
-        }
+#     def to_payload_dict(self) -> Dict[str, Any]:
+#         """
+#         Mengekstrak dictionary murni yang siap disimpan ke kolom `SuratRequest.payload_data`.
+#         """
+#         return {
+#             "instansi_tujuan": self.extracted_payload.instansi_tujuan,
+#             "tujuan_keperluan": self.extracted_payload.tujuan_keperluan,
+#             "posisi_dilamar": self.extracted_payload.posisi_dilamar,
+#             "tanggal_mulai": self.extracted_payload.tanggal_mulai.isoformat(),
+#             "tanggal_selesai": self.extracted_payload.tanggal_selesai.isoformat(),
+#         }
 
 
-# Alias untuk menjaga kompatibilitas impor modul
-AgentLetterOutputSchema = AgentSuratDraftOutputSchema
+# # Alias untuk menjaga kompatibilitas impor modul
+# AgentLetterOutputSchema = AgentSuratDraftOutputSchema
 
 
 def build_dynamic_payload_schema(
