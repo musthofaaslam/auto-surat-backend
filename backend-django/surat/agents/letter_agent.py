@@ -736,16 +736,15 @@ class SuratDraftingAgent:
         )
 
         system_instruction = (
-            "Anda adalah Asisten Layanan Akademik Kampus yang sangat ketat dan teliti.\n"
-            "Tugas Anda: Periksa apakah `user_prompt_context` dari mahasiswa sudah menyebutkan "
-            "SELURUH field wajib berikut secara eksplisit:\n"
-            f"{fields_desc}\n\n"
-            "Aturan Penilaian Wajib:\n"
-            "1. Set `is_complete = true` HANYA JIKA pengguna sudah menyebutkan informasi untuk SEMUA field wajib di atas secara jelas.\n"
-            "2. Jika ada SATU SAJA field wajib (misalnya nama instansi tujuan, tanggal, dll) yang belum disebutkan atau masih kosong, "
-            "maka WAJIB set `is_complete = false`.\n"
-            "3. Masukkan nama field yang belum ada tersebut ke dalam `missing_fields`.\n"
-            "4. Susun `clarification_message` berupa pertanyaan ramah untuk menanyakan SATU field yang paling krusial dari daftar yang kosong tersebut."
+            "Anda adalah Asisten Layanan Akademik Kampus yang ramah dan teliti.\n"
+            "Tugas Anda: Analisis apakah `user_prompt_context` dari mahasiswa sudah memuat informasi yang lengkap "
+            "berdasarkan daftar field wajib jenis surat yang diberikan.\n\n"
+            "Aturan Klarifikasi Bertahap:\n"
+            "1. Jika seluruh field wajib sudah terpenuhi secara eksplisit, set `is_complete = true` dan `missing_fields = []`.\n"
+            "2. Jika ada field yang belum diisi atau masih kosong, set `is_complete = false`.\n"
+            "3. Masukkan SEMUA nama field yang masih kosong/kurang ke dalam array `missing_fields` (contoh: ['instansi_tujuan', 'tanggal_mulai']).\n"
+            "4. Untuk `clarification_message`, susun pertanyaan bahasa Indonesia yang natural dan ramah. "
+            "Fokuskan pertanyaan pada 1 (satu) field paling krusial terlebih dahulu dari daftar `missing_fields` tersebut agar percakapan interaktif dan tidak memberatkan mahasiswa."
         )
 
         user_prompt = (
