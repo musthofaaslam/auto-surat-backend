@@ -133,6 +133,7 @@ def _execute_drafting_agent_worker(
             user_prompt_context=user_prompt_context,
             kode_surat=kode_surat,
             student_metadata=student_metadata,
+            dynamic_fields=dynamic_fields_dict
         )
 
         if hasattr(draft_output, "to_payload_dict") and callable(draft_output.to_payload_dict):
@@ -147,8 +148,10 @@ def _execute_drafting_agent_worker(
         surat_req.revision_notes = list(draft_output.evaluation.revision_notes)
         
         critique_score = draft_output.evaluation.self_critique_score
-        has_missing_info = any("tidak disebutkan" in str(v).lower() for v in structured_payload.values())
-
+        has_missing_info = any(
+            v is None or str(v).strip() in ["", "-", "tidak disebutkan", "null", "undefined"]
+            for v in structured_payload.values()
+        )
         if critique_score < 8 or has_missing_info:
             # JANGAN LOLOSKAN KE PENDING_APPROVAL! Ubah ke status butuh revisi/gagal karena kurang info
             surat_req.status = "REVISION_REQUIRED" # Pastikan status ini ada di model SuratStatus, atau buat status REJECTED/FAILED
@@ -504,14 +507,25 @@ class SuratRequestRedraftAPIView(APIView):
         additional_context = serializer.validated_data["additional_prompt_context"]
 
         # Gabungkan konteks prompt lama dengan catatan koreksi tambahan
+        payload = surat_req.payload_data or {}
+        revision_history = payload.get("revision_history", [])
+        revision_history.append({
+            "attempt": len(revision_history) + 1,
+            "feedback": additional_context
+        })
+        payload["revision_history"] = revision_history
+
+        # Gabungkan secara linear atau terus terang berikan feedback terbaru ke agen
+        # (Opsional: Jika ingin mempertahankan prompt awal asli tanpa nesting berlebih)
         merged_prompt_context = (
-            f"KONTEKS AWAL:\n{surat_req.user_prompt_context}\n\n"
-            f"INFORMASI TAMBAHAN / KOREKSI PENGGUNA:\n{additional_context}"
+            f"{surat_req.user_prompt_context}\n"
+            f"[Koreksi Tambahan #len(revision_history)]: {additional_context}"
         )
 
         surat_req.user_prompt_context = merged_prompt_context
+        surat_req.payload_data = payload
         surat_req.status = SuratStatus.SUBMITTED # Ubah sementara ke SUBMITTED selama diproses worker
-        surat_req.save(update_fields=["user_prompt_context", "status"])
+        surat_req.save(update_fields=["user_prompt_context","payload_data", "status"])
 
         SuratAuditLog.objects.create(
             surat_request=surat_req,

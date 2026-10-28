@@ -662,19 +662,61 @@ class SuratDraftingAgent:
         previous_score: int,
         revision_notes: list,
         student_metadata: Optional[dict] = None,
-    ):
+        style_rules: Optional[List[str]] = None,
+    ) -> BaseModel:
         """
-        Wrapper untuk memproses ulang draf dengan membawa konteks refleksi sebelumnya.
-        Untuk sementara bisa mengarah langsung ke method draft_letter utama atau 
-        menggunakan prompt khusus perbaikan.
+        Memproses ulang penyusunan draf surat (Re-drafting) dengan membawa konteks
+        riwayat draf sebelumnya, payload terdahulu, dan catatan koreksi (revision_notes).
         """
-        # Karena user_prompt_context di re-draft sudah digabung dengan koreksi baru,
-        # kita bisa langsung melesternya ke method draft_letter utama:
-        return self.draft_letter(
+        if not user_prompt_context or not user_prompt_context.strip():
+            raise SuratAgentValidationError(
+                "Konteks permohonan surat (user_prompt_context) wajib diisi untuk re-draft."
+            )
+
+        required_fields = self.get_required_fields_for_kode(kode_surat)
+        output_schema = self.resolve_output_schema(kode_surat, required_fields)
+
+        effective_style_rules = (
+            style_rules
+            if style_rules is not None
+            else self._load_active_style_rules(kode_surat)
+        )
+
+        system_prompt = build_system_prompt(
+            kode_surat=kode_surat,
+            required_fields=required_fields,
+            style_rules=effective_style_rules,
+        )
+
+        # Gunakan prompt khusus perbaikan iteratif dengan menyertakan riwayat sebelumnya
+        revision_user_prompt = build_self_reflection_revision_prompt(
             user_prompt_context=user_prompt_context,
             kode_surat=kode_surat,
-            student_metadata=student_metadata,
+            previous_draft=previous_draft,
+            previous_payload=previous_payload,
+            previous_score=previous_score,
+            revision_notes=revision_notes,
+            required_fields=required_fields,
         )
+
+        logger.info(
+            "Memulai proses Re-draft surat untuk kode_surat=%s menggunakan model=%s (Skor sebelumnya: %d).",
+            kode_surat,
+            self.model_name,
+            previous_score,
+        )
+
+        revised_draft: BaseModel = self._invoke_structured_llm(
+            system_prompt=system_prompt,
+            user_prompt=revision_user_prompt,
+            response_schema=output_schema,
+        )
+
+        logger.info(
+            "Re-draft surat selesai (skor akhir baru=%d).",
+            revised_draft.evaluation.self_critique_score,
+        )
+        return revised_draft
 
     def run(
         self,
