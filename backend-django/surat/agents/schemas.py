@@ -8,61 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 # 2. Struktur komposisi bersarang (`extracted_payload` dan `evaluation`) dipertahankan
 #    karena sangat efektif memisahkan konteks ekstraksi data dan refleksi diri pada LLM.
 
-
-# class SuratMagangPayloadSchema(BaseModel):
-#     """
-#     Kontrak data dasar berdasarkan `required_field_surat.json` untuk jenis surat
-#     observasi atau magang.
-#     """
-
-#     model_config = ConfigDict(
-#         extra="forbid",
-#         str_strip_whitespace=True,
-#     )
-
-#     instansi_tujuan: str = Field(
-#         ...,
-#         min_length=3,
-#         max_length=255,
-#         description="Nama resmi instansi atau perusahaan yang menerima surat.",
-#     )
-#     tujuan_keperluan: str = Field(
-#         ...,
-#         min_length=5,
-#         max_length=500,
-#         description="Tujuan spesifik penggunaan surat secara formal.",
-#     )
-#     posisi_dilamar: str = Field(
-#         ...,
-#         min_length=2,
-#         max_length=150,
-#         description="Posisi atau divisi magang yang dituju.",
-#     )
-#     tanggal_mulai: date = Field(
-#         ...,
-#         description="Tanggal mulai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
-#     )
-#     tanggal_selesai: date = Field(
-#         ...,
-#         description="Tanggal selesai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
-#     )
-
-#     @field_validator("instansi_tujuan", "tujuan_keperluan", "posisi_dilamar")
-#     @classmethod
-#     def validate_non_empty_text(cls, value: str) -> str:
-#         if not value or not value.strip():
-#             raise ValueError("Atribut teks wajib diisi dan tidak boleh hanya berisi spasi kosong.")
-#         return value
-
-#     @model_validator(mode="after")
-#     def validate_date_chronology(self) -> "SuratMagangPayloadSchema":
-#         if self.tanggal_selesai < self.tanggal_mulai:
-#             raise ValueError(
-#                 "Atribut tanggal_selesai tidak boleh lebih awal daripada tanggal_mulai."
-#             )
-#         return self
-
-
 class SelfEvaluationSchema(BaseModel):
     """
     Skema evaluasi diri (Self-Reflection) untuk memvalidasi kualitas draf secara internal
@@ -93,46 +38,8 @@ class SelfEvaluationSchema(BaseModel):
                 "minimal satu alasan evaluasi untuk ditinjau oleh Admin."
             )
         return self
-
-
-# class AgentSuratDraftOutputSchema(BaseModel):
-#     """
-#     Skema Structured Output utama yang dikembalikan oleh Surat Agent pada Fase 1.
-#     """
-
-#     model_config = ConfigDict(
-#         extra="forbid",
-#         str_strip_whitespace=True,
-#     )
-
-#     # extracted_payload: SuratMagangPayloadSchema = Field(
-#     #     ...,
-#     #     description="Data atribut terstruktur yang diekstrak dari konteks pengguna.",
-#     # )
-#     ai_original_draft: str = Field(
-#         ...,
-#         min_length=50,
-#         description="Naskah draf surat formal utuh yang disusun oleh agen.",
-#     )
-#     evaluation: SelfEvaluationSchema = Field(
-#         ...,
-#         description="Hasil evaluasi internal agen terhadap draf yang baru disusun.",
-#     )
-
-#     def to_payload_dict(self) -> Dict[str, Any]:
-#         """
-#         Mengekstrak dictionary murni yang siap disimpan ke kolom `SuratRequest.payload_data`.
-#         """
-#         return {
-#             "instansi_tujuan": self.extracted_payload.instansi_tujuan,
-#             "tujuan_keperluan": self.extracted_payload.tujuan_keperluan,
-#             "posisi_dilamar": self.extracted_payload.posisi_dilamar,
-#             "tanggal_mulai": self.extracted_payload.tanggal_mulai.isoformat(),
-#             "tanggal_selesai": self.extracted_payload.tanggal_selesai.isoformat(),
-#         }
-
-
-# # Alias untuk menjaga kompatibilitas impor modul
+    
+# Alias untuk menjaga kompatibilitas impor modul
 # AgentLetterOutputSchema = AgentSuratDraftOutputSchema
 from typing import Optional # Pastikan Optional sudah diimpor
 
@@ -184,4 +91,20 @@ def create_dynamic_agent_output_schema(dynamic_payload_schema: Type[BaseModel]) 
         extracted_payload=(dynamic_payload_schema, Field(..., description="Data atribut terstruktur dinamis.")),
         ai_original_draft=(str, Field(..., min_length=50, description="Naskah draf surat formal utuh.")),
         evaluation=(SelfEvaluationSchema, Field(..., description="Hasil evaluasi internal agen.")),
+    )
+    
+class ClarificationEvaluationSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    is_complete: bool = Field(
+        ...,
+        description="Bernilai True jika informasi dari pengguna sudah cukup untuk menyusun surat, False jika ada data wajib yang kurang."
+    )
+    missing_fields: List[str] = Field(
+        default_factory=list,
+        description="Daftar atribut atau informasi spesifik yang masih belum disebutkan oleh pengguna."
+    )
+    clarification_message: str = Field(
+        default="",
+        description="Pesan pertanyaan interaktif yang ramah, sopan, dan spesifik dalam bahasa Indonesia untuk meminta informasi yang kurang kepada mahasiswa."
     )

@@ -25,6 +25,7 @@ from surat.agents.schemas import (
     # SuratMagangPayloadSchema,
     build_dynamic_payload_schema,
     create_dynamic_agent_output_schema,
+    ClarificationEvaluationSchema,
 )
 
 # SARAN PERBAIKAN ARSITEKTURAL:
@@ -718,6 +719,69 @@ class SuratDraftingAgent:
         )
         return revised_draft
 
+    def check_or_clarify_request(
+        self,
+        user_prompt_context: str,
+        kode_surat: str,
+        student_metadata: Optional[Dict[str, Any]] = None,
+    ) -> ClarificationEvaluationSchema:
+        """
+        Melakukan pra-pemeriksaan cerdas (Pre-check) menggunakan LLM untuk menentukan
+        apakah konteks permohonan pengguna sudah cukup lengkap atau memerlukan klarifikasi.
+        """
+        required_fields = self.get_required_fields_for_kode(kode_surat)
+        
+        # Susun daftar field yang diharapkan
+        fields_desc = "\n".join(
+            f"- `{item.get('field')}` (Label: {item.get('label')}): {item.get('description')}"
+            for item in required_fields
+        )
+
+        system_instruction = (
+            "Anda adalah Asisten Layanan Akademik Kampus yang bertugas mengecek kelengkapan "
+            "informasi dari permohonan surat mahasiswa sebelum draf disusun.\n"
+            "Tugas Anda: Analisis apakah `user_prompt_context` sudah memuat informasi yang cukup "
+            "untuk mengisi field wajib berikut:\n"
+            f"{fields_desc}\n\n"
+            "Aturan:\n"
+            "1. Jika informasi sudah cukup memadai untuk menyusun surat, set `is_complete = true`.\n"
+            "2. Jika ada informasi yang kurang, set `is_complete = false`.\n"
+            "3. **PENTING:** Jika ada beberapa field yang kurang, **hanya pilih satu field yang paling utama/pertama** untuk dimasukkan ke `missing_fields`, dan susun `clarification_message` yang menanyakan hal tersebut secara natural dan spesifik (jangan menanyakan semuanya sekaligus agar pengguna tidak kewalahan).  dan susun kalimat pertanyaan yang ramah di `clarification_message` agar mahasiswa melengkapinya."
+        )
+
+        user_prompt = (
+            f"KODE SURAT: {kode_surat}\n"
+            f"KONTEKS MAHASISWA:\n\"\"\"\n{user_prompt_context}\n\"\"\""
+        )
+
+        # Gunakan pemanggilan terstruktur LLM dengan skema klarifikasi
+        client = self._get_or_create_client()
+        json_schema = self._build_gemini_compatible_json_schema(ClarificationEvaluationSchema)
+
+        try:
+            from google.genai import types
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                response_json_schema=json_schema,
+                temperature=0.1,
+            )
+        except ImportError:
+            config = {
+                "system_instruction": system_instruction,
+                "response_mime_type": "application/json",
+                "response_json_schema": json_schema,
+                "temperature": 0.1,
+            }
+
+        response = client.models.generate_content(
+            model=self.model_name,
+            contents=user_prompt,
+            config=config,
+        )
+        
+        return self._parse_and_validate_response(response, ClarificationEvaluationSchema)
+    
     def run(
         self,
         user_prompt_context: str,
