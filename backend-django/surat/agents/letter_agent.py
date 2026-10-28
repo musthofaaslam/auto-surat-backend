@@ -652,6 +652,29 @@ class SuratDraftingAgent:
             revised_draft.evaluation.self_critique_score,
         )
         return revised_draft
+    
+    def draft_letter_with_reflection(
+        self,
+        user_prompt_context: str,
+        kode_surat: str,
+        previous_draft: str,
+        previous_payload: dict,
+        previous_score: int,
+        revision_notes: list,
+        student_metadata: Optional[dict] = None,
+    ):
+        """
+        Wrapper untuk memproses ulang draf dengan membawa konteks refleksi sebelumnya.
+        Untuk sementara bisa mengarah langsung ke method draft_letter utama atau 
+        menggunakan prompt khusus perbaikan.
+        """
+        # Karena user_prompt_context di re-draft sudah digabung dengan koreksi baru,
+        # kita bisa langsung melesternya ke method draft_letter utama:
+        return self.draft_letter(
+            user_prompt_context=user_prompt_context,
+            kode_surat=kode_surat,
+            student_metadata=student_metadata,
+        )
 
     def run(
         self,
