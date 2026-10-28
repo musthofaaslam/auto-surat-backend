@@ -78,7 +78,7 @@ def check_active_scholarship_status(student_data):
     
     return True, "Belum ada beasiswa aktif yang terdaftar."
 
-def verify_internship_semester_and_credits(student_data, minimum_sks=80):
+def verify_internship_semester_and_credits(student_data, minimum_sks=60):
     """
     Helper untuk memvalidasi apakah mahasiswa sudah memenuhi syarat SKS minimum 
     dan berada di semester yang diperbolehkan untuk mengambil magang.
