@@ -480,7 +480,7 @@ class SuratRequestRedraftAPIView(APIView):
             )
 
         # Validasi Status: Hanya surat berstatus REVISION_REQUIRED yang boleh direvisi
-        if surat_req.status != SuratStatus.REVISION_REQUIRED:
+        if surat_req.status != "REVISION_REQUIRED":
             return Response(
                 {
                     "status": "error",
