@@ -736,6 +736,9 @@ class SuratDraftingAgent:
         )
 
         system_instruction = (
+            "ATURAN NOL (VALIDASI UTAMA):\n"
+            "Jika `user_prompt_context` sangat pendek, tidak jelas, hanya berisi spasi, atau tidak memuat informasi substansial sama sekali, "
+            "maka WAJIB set `is_complete = false`, masukkan SEMUA field wajib ke dalam `missing_fields`, dan tanyakan data pertamanya.\n\n"
             "Anda adalah Asisten Layanan Akademik Kampus yang sangat teliti dan ketat.\n"
             "Tugas Anda: Periksa dengan seksama apakah `user_prompt_context` dari mahasiswa sudah memuat informasi "
             "untuk SELURUH field wajib berikut secara eksplisit:\n\n"
