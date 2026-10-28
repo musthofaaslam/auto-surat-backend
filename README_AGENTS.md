@@ -1,10 +1,5 @@
 # Dokumentasi Teknis & Panduan Integrasi Backend: AutoSurat Agentic AI (`surat/agents/`)
 
-Dokumen ini disusun oleh **AI Engineer** sebagai referensi utama bagi **Backend Engineer**, **Frontend Engineer**, dan **Project Manager (PM)** untuk memahami:
-1. **Rincian Fitur Modul Agent (`backend-django/surat/agents/`)** yang telah tervalidasi dan berjalan dengan baik (26/26 Unit & Integration Tests `OK`).
-2. **Katalog Fungsi / Interface Siap Panggil (*Ready-to-Call Agent Functions*)** yang telah disediakan oleh modul `surat.agents`.
-3. **Panduan Integrasi Eksplisit (*Step-by-Step Hookup Guide*) bagi Tim Backend** untuk menyambungkan fungsi-fungsi agen ke `surat/views.py`, `surat/services/validators.py`, dan `templates/kerangka-surat/`.
-
 ---
 
 ## 1. Daftar Fitur Modul Agent yang Sudah Berjalan dengan Baik (Tervalidasi)
