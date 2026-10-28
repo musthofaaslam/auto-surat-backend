@@ -695,7 +695,8 @@ class SuratRequestCreateAPIView(APIView):
                 student_metadata=student_metadata,
             )
         except Exception as exc:
-            logger.warning("Gagal menjalankan pre-check klarifikasi, melanjutkan ke drafting: %s", exc)
+            # logger.warning("Gagal menjalankan pre-check klarifikasi, melanjutkan ke drafting: %s", exc)
+            logger.exception("TERJADI ERROR DETAIL PADA PRE-CHECK KLARIFIKASI:")
             clarification_result = None
 
         # Jika AI menilai data belum lengkap (misal kurang tanggal atau instansi),
