@@ -134,7 +134,7 @@ class SelfEvaluationSchema(BaseModel):
 
 # # Alias untuk menjaga kompatibilitas impor modul
 # AgentLetterOutputSchema = AgentSuratDraftOutputSchema
-
+from typing import Optional # Pastikan Optional sudah diimpor
 
 def build_dynamic_payload_schema(
     schema_name: str, required_fields: Union[List[Dict[str, str]], Dict[str, str]]
@@ -142,6 +142,7 @@ def build_dynamic_payload_schema(
     """
     Factory function untuk membangun skema Pydantic secara dinamis baik dari struktur list
     pada `required_field_surat.json` maupun dictionary dari database.
+    Seluruh field dibuat opsional (bisa bernilai None) untuk mendukung Zero-Hallucination Policy.
     """
     field_definitions: Dict[str, Any] = {}
 
@@ -151,18 +152,19 @@ def build_dynamic_payload_schema(
             field_type_str = item.get("type", "string")
             desc = item.get("description") or item.get("label", "")
 
+            # Ubah tipe menjadi Optional dan default=None agar tidak wajib diisi AI
             if field_type_str == "date":
-                field_definitions[field_name] = (date, Field(..., description=desc))
+                field_definitions[field_name] = (Optional[date], Field(None, description=desc))
             else:
                 field_definitions[field_name] = (
-                    str,
-                    Field(..., min_length=1, description=desc),
+                    Optional[str],
+                    Field(None, description=desc),
                 )
     elif isinstance(required_fields, dict):
         for field_name, field_description in required_fields.items():
             field_definitions[field_name] = (
-                str,
-                Field(..., min_length=1, description=str(field_description)),
+                Optional[str],
+                Field(None, description=str(field_description)),
             )
 
     return create_model(
