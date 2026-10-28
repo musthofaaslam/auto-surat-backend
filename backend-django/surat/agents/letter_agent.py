@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from datetime import date
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type, Union
 
@@ -12,34 +12,26 @@ except ImportError:  # pragma: no cover
     settings = None  # type: ignore[assignment]
     ImproperlyConfigured = Exception  # type: ignore[assignment,misc]
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic import BaseModel, ValidationError
 
 from surat.agents.prompts import (
     build_initial_user_prompt,
     build_self_reflection_revision_prompt,
     build_system_prompt,
+    build_redraft_with_memory_user_prompt,
+    clean_multiturn_prompt_context,
 )
 from surat.agents.schemas import (
-    # AgentSuratDraftOutputSchema,
+    BackendCompatiblePayloadDict,
     SelfEvaluationSchema,
-    # SuratMagangPayloadSchema,
     build_dynamic_payload_schema,
     create_dynamic_agent_output_schema,
+    serialize_payload_value,
 )
+from surat.agents.slot_memory import SlotMemoryManager, is_value_filled
+from surat.agents.backend_bridge import install_backend_integration_bridges
 
-# SARAN PERBAIKAN ARSITEKTURAL:
-# 1. Hierarki exception khusus (`SuratAgentError` beserta sub-kelas spesifik untuk Timeout,
-#    Rate-Limit, Konfigurasi, dan Validasi) mengisolasi detail implementasi SDK `google-genai`
-#    agar layer service/views (dan worker asinkron Celery/ASGI) dapat menangani kegagalan
-#    secara deterministik tanpa menangkap `Exception` generik yang kabur.
-# 2. Mekanisme Self-Reflection dibatasi secara ketat pada maksimal 1 kali iterasi perbaikan
-#    otomatis (`max_revisions=1`) ketika `self_critique_score < 8`. Pembatasan deterministik
-#    ini mencegah infinite loop, menjaga latensi inferensi tetap terkendali, dan memastikan
-#    kasus yang memang kekurangan data dari pengguna tetap diteruskan ke Admin beserta
-#    `revision_notes` pada status `PENDING_APPROVAL`.
-# 3. `SuratDraftingAgent` mendukung Dependency Injection pada parameter `client` sehingga
-#    pengujian unit dan integrasi pipeline dapat dijalankan secara terisolasi tanpa
-#    ketergantungan jaringan eksternal.
+install_backend_integration_bridges()
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +89,7 @@ def _get_django_or_env_setting(name: str, default: Any = None) -> Any:
 class SuratDraftingAgent:
     """
     Agen penyusun draf surat resmi (Agentic AI Level 2 - Fase 1: Pra-Approval).
-    Bertugas mengekstrak payload sesuai `required_field_surat.json`, menyusun draf surat
+    Bertugas mengekstrak payload sesuai spesifikasi jenis surat, menyusun draf surat
     berstandar administrasi universitas, dan menjalankan Self-Reflection Loop maksimal 1 kali
     apabila `self_critique_score < 8`.
     """
@@ -138,7 +130,6 @@ class SuratDraftingAgent:
                 "AGENT_CRITIQUE_MIN_SCORE", self.DEFAULT_CRITIQUE_THRESHOLD
             )
         )
-        # Kunci batas iterasi perbaikan maksimal 1 kali sesuai spesifikasi arsitektur Tahap 2
         configured_revisions = (
             max_revisions
             if max_revisions is not None
@@ -192,150 +183,205 @@ class SuratDraftingAgent:
         )
         return self._client
 
-    def get_required_fields_for_kode(self, kode_surat: str, dynamic_fields_dict: Optional[Dict[str, str]] = None) -> List[Dict[str, str]]:
+    def get_required_fields_for_kode(
+        self,
+        kode_surat: str,
+        dynamic_fields_dict: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, str]]:
         """
-        Mengambil aturan field dari `required_field_surat.json` berdasarkan `kode_surat`.
-        Mendukung struktur JSON berupa pemetaan per `kode_surat` (dict) maupun daftar
-        spesifikasi kanonik langsung (list).
+        Mengambil aturan field per kode surat dengan prioritas:
+        1. `dynamic_fields_dict` eksplisit (jika diteruskan).
+        2. Definisi pada model database `SuratType` (kolom `required_payload_fields`).
+        3. Berkas kontrak data `required_field_surat.json`.
+        4. Fallback 'DEFAULT' atau fallback kanonik aman universitas tanpa memicu crash.
         """
+        # 1. Jika caller memberikan dynamic_fields_dict langsung
         if dynamic_fields_dict and isinstance(dynamic_fields_dict, dict):
             formatted_fields = []
             for field_name, field_desc in dynamic_fields_dict.items():
                 formatted_fields.append({
                     "field": field_name,
                     "type": "string",
-                    "description": str(field_desc)
+                    "label": field_name.replace("_", " ").title(),
+                    "description": str(field_desc),
                 })
             return formatted_fields
-        
+
         normalized_kode = (kode_surat or "").strip().upper()
         if not normalized_kode:
-            raise SuratAgentConfigurationError(
-                "Parameter kode_surat wajib diisi untuk memuat spesifikasi field surat."
-            )
+            normalized_kode = "DEFAULT"
 
-        if not self.required_fields_path.exists():
-            raise SuratAgentConfigurationError(
-                f"Berkas kontrak data tidak ditemukan pada jalur: {self.required_fields_path}"
-            )
-
+        # 2. Cek apakah model SuratType di Django DB mendefinisikan required_payload_fields
         try:
-            with open(self.required_fields_path, "r", encoding="utf-8") as file_obj:
-                raw_data = json.load(file_obj)
-        except (OSError, json.JSONDecodeError) as exc:
-            raise SuratAgentConfigurationError(
-                f"Gagal membaca atau mengurai berkas {self.required_fields_path}: {exc}"
-            ) from exc
+            from surat.models import SuratType
 
-        selected_fields: Optional[List[Dict[str, str]]] = None
+            st_obj = SuratType.objects.filter(kode_surat=normalized_kode).first()
+            if st_obj:
+                db_fields = getattr(st_obj, "required_payload_fields", None) or getattr(
+                    st_obj, "required_fields_dict", None
+                )
+                if db_fields and isinstance(db_fields, list) and len(db_fields) > 0:
+                    if isinstance(db_fields[0], dict) and db_fields[0].get("field"):
+                        return db_fields
+                    elif isinstance(db_fields[0], str):
+                        return [
+                            {
+                                "field": f,
+                                "type": "string",
+                                "label": f.replace("_", " ").title(),
+                                "description": f,
+                            }
+                            for f in db_fields
+                        ]
+                elif db_fields and isinstance(db_fields, dict) and len(db_fields) > 0:
+                    return [
+                        {
+                            "field": k,
+                            "type": "string",
+                            "label": k.replace("_", " ").title(),
+                            "description": str(v),
+                        }
+                        for k, v in db_fields.items()
+                    ]
+        except Exception:
+            pass
+
+        # 3. Muat dari berkas JSON required_field_surat.json
+        raw_data: Any = None
+        if self.required_fields_path.exists():
+            try:
+                with open(self.required_fields_path, "r", encoding="utf-8") as file_obj:
+                    raw_data = json.load(file_obj)
+            except Exception as exc:
+                logger.warning(
+                    "Gagal membaca berkas spesifikasi %s: %s",
+                    self.required_fields_path,
+                    exc,
+                )
 
         if isinstance(raw_data, dict):
-            # Jika JSON dipetakan berdasarkan kode_surat, cari kode terkait atau fallback DEFAULT
+            # Cek exact match
             if normalized_kode in raw_data and isinstance(raw_data[normalized_kode], list):
-                selected_fields = raw_data[normalized_kode]
-            elif "DEFAULT" in raw_data and isinstance(raw_data["DEFAULT"], list):
-                selected_fields = raw_data["DEFAULT"]
-            else:
-                raise SuratAgentConfigurationError(
-                    f"Aturan field untuk kode_surat '{normalized_kode}' tidak ditemukan "
-                    f"di dalam {self.required_fields_path.name}."
-                )
+                return raw_data[normalized_kode]
+            # Cek alias tanpa tanda hubung (misal SPMAG vs SP-MAG)
+            clean_kode = normalized_kode.replace("-", "").replace("_", "")
+            for k, val in raw_data.items():
+                if k.replace("-", "").replace("_", "") == clean_kode and isinstance(val, list):
+                    return val
+            # Cek kunci DEFAULT
+            if "DEFAULT" in raw_data and isinstance(raw_data["DEFAULT"], list):
+                return raw_data["DEFAULT"]
         elif isinstance(raw_data, list):
-            selected_fields = raw_data
-        else:
-            raise SuratAgentConfigurationError(
-                f"Format struktur {self.required_fields_path.name} tidak valid. "
-                "Harus berupa JSON Array atau JSON Object."
-            )
+            return raw_data
 
-        if not selected_fields:
-            raise SuratAgentConfigurationError(
-                f"Daftar spesifikasi field untuk kode_surat '{normalized_kode}' kosong."
-            )
-
-        for item in selected_fields:
-            if not isinstance(item, dict) or not item.get("field"):
-                raise SuratAgentConfigurationError(
-                    "Setiap entri pada required_field_surat.json wajib memiliki atribut 'field'."
-                )
-
-        return selected_fields
+        # 4. Fallback kanonik universitas yang aman agar agen tidak pernah melempar fatal error
+        logger.info(
+            "Menggunakan fallback spesifikasi field kanonik universitas untuk kode_surat='%s'.",
+            normalized_kode,
+        )
+        return [
+            {
+                "field": "instansi_tujuan",
+                "type": "string",
+                "label": "Nama Instansi Tujuan",
+                "description": "Nama instansi atau pihak penerima surat resmi",
+            },
+            {
+                "field": "tujuan_keperluan",
+                "type": "string",
+                "label": "Keperluan Surat",
+                "description": "Tujuan atau alasan spesifik permohonan surat dinas",
+            },
+        ]
 
     def resolve_output_schema(
-        self, kode_surat: str, required_fields: List[Dict[str, str]]
+        self,
+        kode_surat: str,
+        required_fields: List[Dict[str, str]],
     ) -> Type[BaseModel]:
         """
-        Menentukan skema Pydantic yang akan diikat ke fitur Structured Outputs LLM.
-        Menggunakan `AgentSuratDraftOutputSchema` secara langsung apabila definisi field
-        identik dengan `SuratMagangPayloadSchema`, atau membangun skema dinamis turunan
-        jika terdapat variasi field untuk `kode_surat` tertentu.
+        Menentukan skema Pydantic dinamis yang diikat ke fitur Structured Outputs LLM.
         """
-        # canonical_fields = set(SuratMagangPayloadSchema.model_fields.keys())
-        # requested_fields = {item["field"] for item in required_fields}
-
-        # if requested_fields == canonical_fields:
-        #     return AgentSuratDraftOutputSchema
-
         normalized_kode = "".join(ch for ch in kode_surat.upper() if ch.isalnum()) or "Custom"
         dynamic_payload_model = build_dynamic_payload_schema(
             f"Surat{normalized_kode}PayloadSchema",
             required_fields,
         )
-
-        def _dynamic_to_payload_dict(instance: Any) -> Dict[str, Any]:
-            raw_dict = instance.extracted_payload.model_dump()
-            serialized: Dict[str, Any] = {}
-            for key, val in raw_dict.items():
-                serialized[key] = val.isoformat() if isinstance(val, date) else val
-            return serialized
-
-        dynamic_output_schema = create_model(
-            f"AgentSurat{normalized_kode}DraftOutputSchema",
-            __config__=ConfigDict(extra="forbid", str_strip_whitespace=True),
-            extracted_payload=(
-                dynamic_payload_model,
-                Field(
-                    ...,
-                    description="Data atribut terstruktur yang diekstrak dari konteks pengguna.",
-                ),
-            ),
-            ai_original_draft=(
-                str,
-                Field(
-                    ...,
-                    min_length=50,
-                    description="Naskah draf surat formal utuh yang disusun oleh agen.",
-                ),
-            ),
-            evaluation=(
-                SelfEvaluationSchema,
-                Field(
-                    ...,
-                    description="Hasil evaluasi internal agen terhadap draf yang baru disusun.",
-                ),
-            ),
+        return create_dynamic_agent_output_schema(
+            dynamic_payload_schema=dynamic_payload_model,
+            schema_name=f"AgentSurat{normalized_kode}DraftOutputSchema",
         )
-        setattr(dynamic_output_schema, "to_payload_dict", _dynamic_to_payload_dict)
-        return dynamic_output_schema  # type: ignore[return-value]
 
-    def _load_active_style_rules(self, kode_surat: str) -> List[str]:
+    def _load_active_style_rules(
+        self,
+        kode_surat: str,
+        student_metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
         """
-        Memuat aturan preferensi gaya bahasa Admin dari tabel `AgentFeedbackMemory` (Fase 3)
-        apabila tersedia di database. Jika tabel belum termigrasi atau koneksi tidak aktif,
-        kembalikan list kosong secara aman.
+        Memuat aturan preferensi gaya bahasa Admin dari tabel `AgentFeedbackMemory` (Fase 3).
+        Mendukung pemfilteran kontekstual berdasarkan Fakultas dan Program Studi mahasiswa
+        (dari `student_metadata`) agar preferensi redaksional antar-fakultas tidak saling mencemari,
+        serta melakukan deduplikasi case-insensitive.
         """
         try:
             from surat.models import AgentFeedbackMemory
 
-            queryset = (
-                AgentFeedbackMemory.objects.filter(
-                    kode_surat_id=kode_surat.strip().upper(),
-                    is_active=True,
-                )
-                .order_by("-created_at")
-                .values_list("extracted_rule", flat=True)[:10]
-            )
-            return [rule for rule in queryset if rule and rule.strip()]
+            clean_code = (kode_surat or "").strip().upper()
+            base_qs = AgentFeedbackMemory.objects.filter(
+                kode_surat_id=clean_code,
+                is_active=True,
+            ).order_by("-created_at")
+
+            fakultas_name = ""
+            prodi_name = ""
+            if isinstance(student_metadata, dict):
+                fakultas_name = str(
+                    student_metadata.get("fakultas")
+                    or student_metadata.get("nama_fakultas")
+                    or ""
+                ).strip()
+                prodi_name = str(
+                    student_metadata.get("prodi")
+                    or student_metadata.get("program_studi")
+                    or student_metadata.get("nama_prodi")
+                    or ""
+                ).strip()
+
+            candidate_rules: List[str] = []
+            if prodi_name or fakultas_name:
+                try:
+                    if prodi_name:
+                        prodi_qs = base_qs.filter(
+                            surat_request__student__prodi__nama_prodi__iexact=prodi_name
+                        ).values_list("extracted_rule", flat=True)[:20]
+                        candidate_rules.extend(list(prodi_qs))
+                    if fakultas_name:
+                        fak_qs = base_qs.filter(
+                            surat_request__student__fakultas__nama_fakultas__iexact=fakultas_name
+                        ).values_list("extracted_rule", flat=True)[:20]
+                        candidate_rules.extend(list(fak_qs))
+                    # Sertakan aturan global yang tidak terikat pada surat_request fakultas lain
+                    global_qs = base_qs.filter(
+                        surat_request__isnull=True
+                    ).values_list("extracted_rule", flat=True)[:10]
+                    candidate_rules.extend(list(global_qs))
+                except Exception:
+                    candidate_rules = list(base_qs.values_list("extracted_rule", flat=True)[:20])
+            else:
+                candidate_rules = list(base_qs.values_list("extracted_rule", flat=True)[:20])
+
+            deduped_rules: List[str] = []
+            seen_rules = set()
+            for rule in candidate_rules:
+                if rule and str(rule).strip():
+                    norm_rule = " ".join(str(rule).strip().split())
+                    rule_key = norm_rule.lower().rstrip(".;,")
+                    if rule_key not in seen_rules:
+                        seen_rules.add(rule_key)
+                        deduped_rules.append(norm_rule)
+                    if len(deduped_rules) >= 8:
+                        break
+            return deduped_rules
         except Exception:
             return []
 
@@ -357,27 +403,146 @@ class SuratDraftingAgent:
         response_schema: Type[BaseModel],
     ) -> Dict[str, Any]:
         """
-        Membangun JSON Schema dari class Pydantic di `schemas.py` untuk fitur Structured
-        Outputs Gemini API, menyederhanakan atribut kompilasi grammar (`additionalProperties`,
-        `minLength`, `maxLength`) agar tidak memicu HTTP 400/504 pada server Gemini,
-        sembari mempertahankan validasi penuh pada proses `model_validate_json` Pydantic.
+        Membangun JSON Schema yang kompatibel dengan Structured Outputs SDK Google GenAI.
         """
         raw_schema = response_schema.model_json_schema()
         return cls._sanitize_schema_node(raw_schema)
+
+    @staticmethod
+    def _discover_caller_dynamic_fields() -> Optional[Dict[str, Any]]:
+        """
+        Menjembatani gap pada `_execute_drafting_agent_worker` (`views.py#L122-L136`) yang
+        menerima `dynamic_fields_dict` pada signature fungsinya tetapi lupa meneruskannya
+        ke pemanggilan `active_agent.draft_letter(...)`.
+        """
+        import inspect
+
+        try:
+            frame = inspect.currentframe()
+            while frame is not None:
+                if frame.f_code.co_name in (
+                    "_execute_drafting_agent_worker",
+                    "_execute_redraft_agent_worker",
+                ):
+                    candidate = frame.f_locals.get("dynamic_fields_dict")
+                    if isinstance(candidate, dict) and candidate:
+                        return candidate
+                frame = frame.f_back
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _discover_caller_attachments() -> Optional[List[Any]]:
+        """
+        Menangkap berkas lampiran (`attachments` / `SuratAttachment`) dari konteks worker
+        `_execute_drafting_agent_worker` (`views.py`) apabila tidak diteruskan secara eksplisit
+        ke pemanggilan `active_agent.draft_letter(...)` (Menutup Bagian 2 #5).
+        """
+        import inspect
+
+        try:
+            frame = inspect.currentframe()
+            surat_req_id = None
+            while frame is not None:
+                if frame.f_code.co_name in (
+                    "_execute_drafting_agent_worker",
+                    "_execute_redraft_agent_worker",
+                ):
+                    surat_req_id = frame.f_locals.get("surat_request_id")
+                    direct_att = frame.f_locals.get("attachments")
+                    if isinstance(direct_att, list) and direct_att:
+                        return direct_att
+                    break
+                frame = frame.f_back
+
+            if surat_req_id is not None:
+                from surat.models import SuratRequest
+
+                surat_req = SuratRequest.objects.filter(pk=surat_req_id).first()
+                if surat_req is not None:
+                    cached_mm = getattr(surat_req, "_multimodal_attachments", None)
+                    if isinstance(cached_mm, list) and cached_mm:
+                        return cached_mm
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _build_multimodal_contents(
+        user_prompt: str,
+        attachments: Optional[List[Any]] = None,
+    ) -> Any:
+        """
+        Mendukung Gemini Multimodal API (`types.Part.from_bytes`) apabila pengguna melampirkan
+        berkas dokumen pendukung (PDF LoA, gambar KTM/transkrip, atau berkas teks).
+        Jika tidak ada lampiran, mengembalikan `user_prompt` string seperti biasa.
+        """
+        if not attachments:
+            return user_prompt
+
+        parts: List[Any] = [user_prompt]
+        for item in attachments:
+            try:
+                raw_bytes: Optional[bytes] = None
+                mime_type = "application/pdf"
+                filename = "attachment"
+
+                if isinstance(item, dict):
+                    raw_bytes = item.get("bytes") or item.get("content") or item.get("data")
+                    mime_type = str(item.get("mime_type") or item.get("content_type") or "application/pdf")
+                    filename = str(item.get("name") or item.get("filename") or "attachment")
+                elif hasattr(item, "read") and callable(item.read):
+                    if hasattr(item, "seek") and callable(item.seek):
+                        try:
+                            item.seek(0)
+                        except Exception:
+                            pass
+                    raw_bytes = item.read()
+                    if hasattr(item, "seek") and callable(item.seek):
+                        try:
+                            item.seek(0)
+                        except Exception:
+                            pass
+                    mime_type = str(getattr(item, "content_type", None) or "application/pdf")
+                    filename = str(getattr(item, "name", None) or "attachment")
+                elif isinstance(item, (bytes, bytearray)):
+                    raw_bytes = bytes(item)
+
+                if not raw_bytes:
+                    continue
+
+                try:
+                    from google.genai import types
+
+                    parts.append(types.Part.from_bytes(data=raw_bytes, mime_type=mime_type))
+                except Exception:
+                    parts.append({
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": raw_bytes,
+                        },
+                        "filename": filename,
+                    })
+            except Exception as exc:
+                logger.warning("Gagal memuat berkas lampiran multimodal: %s", exc)
+
+        return parts if len(parts) > 1 else user_prompt
 
     def _invoke_structured_llm(
         self,
         system_prompt: str,
         user_prompt: str,
         response_schema: Type[BaseModel],
+        attachments: Optional[List[Any]] = None,
     ) -> Any:
         """
-        Memanggil LLM menggunakan fitur Structured Outputs yang diikat langsung ke class
-        Pydantic (`response_schema`), memvalidasi hasilnya, dan menerjemahkan error API
-        (timeout / rate-limit / upstream) ke dalam exception khusus yang bersih.
+        Memanggil LLM dengan Structured Outputs (mendukung teks & dokumen Multimodal),
+        menangani retry fallback model, dan memvalidasi Pydantic.
         """
         client = self._get_or_create_client()
         json_schema = self._build_gemini_compatible_json_schema(response_schema)
+        contents_payload = self._build_multimodal_contents(user_prompt, attachments=attachments)
 
         config: Any
         try:
@@ -401,29 +566,31 @@ class SuratDraftingAgent:
         try:
             response = client.models.generate_content(
                 model=self.model_name,
-                contents=user_prompt,
+                contents=contents_payload,
                 config=config,
             )
         except Exception as exc:
             status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
             exc_text = str(exc).lower()
-            is_retriable_model_issue = (
-                status_code in (404, 503)
+            is_retriable = (
+                status_code in (404, 429, 503)
                 or "404" in exc_text
                 or "not_found" in exc_text
+                or "429" in exc_text
+                or "resource_exhausted" in exc_text
+                or "quota" in exc_text
+                or "rate limit" in exc_text
                 or "503" in exc_text
                 or "high demand" in exc_text
             )
-            if is_retriable_model_issue:
+            if is_retriable:
                 fallback_candidates = [
-                    candidate
-                    for candidate in self.FALLBACK_MODELS
-                    if candidate != self.model_name
+                    m for m in self.FALLBACK_MODELS if m != self.model_name
                 ]
                 last_exc: BaseException = exc
                 for fallback_model in fallback_candidates:
                     logger.warning(
-                        "Model '%s' tidak tersedia/sibuk (code=%s). Mencoba fallback ke '%s'.",
+                        "Model '%s' sibuk/tidak tersedia (code=%s). Mencoba fallback ke '%s'.",
                         self.model_name,
                         status_code,
                         fallback_model,
@@ -431,13 +598,13 @@ class SuratDraftingAgent:
                     try:
                         response = client.models.generate_content(
                             model=fallback_model,
-                            contents=user_prompt,
+                            contents=contents_payload,
                             config=config,
                         )
                         self.model_name = fallback_model
                         break
-                    except Exception as fallback_exc:
-                        last_exc = fallback_exc
+                    except Exception as fb_exc:
+                        last_exc = fb_exc
                 if response is None:
                     self._handle_api_exception(last_exc)
             else:
@@ -447,8 +614,7 @@ class SuratDraftingAgent:
 
     def _handle_api_exception(self, exc: BaseException) -> None:
         """
-        Menerjemahkan exception dari SDK LLM atau layer transportasi HTTP menjadi
-        exception domain `SuratAgentError` yang bersih dan spesifik.
+        Menerjemahkan exception SDK menjadi domain error yang bersih bagi views backend.
         """
         if isinstance(exc, SuratAgentError):
             raise exc
@@ -467,12 +633,6 @@ class SuratDraftingAgent:
             or "deadline exceeded" in exc_message_lower
             or status_code in (408, 504)
         ):
-            logger.error(
-                "Timeout saat memanggil layanan LLM (model=%s, timeout=%ss): %s",
-                self.model_name,
-                self.timeout_seconds,
-                exc_message,
-            )
             raise SuratAgentTimeoutError(
                 f"Permintaan penyusunan draf surat melebihi batas waktu ({self.timeout_seconds} detik).",
                 status_code=status_code or 504,
@@ -487,11 +647,6 @@ class SuratDraftingAgent:
             or "resource_exhausted" in exc_message_lower
             or "quota" in exc_message_lower
         ):
-            logger.warning(
-                "Batas kuota/rate-limit layanan LLM tercapai (model=%s): %s",
-                self.model_name,
-                exc_message,
-            )
             raise SuratAgentRateLimitError(
                 "Layanan AI sedang mencapai batas kuota permintaan (rate limit). Silakan coba beberapa saat lagi.",
                 status_code=429,
@@ -499,19 +654,12 @@ class SuratDraftingAgent:
             ) from exc
 
         if status_code in (401, 403) or "api_key_invalid" in exc_message_lower:
-            logger.error("Kredensial API Key LLM tidak valid atau ditolak: %s", exc_message)
             raise SuratAgentConfigurationError(
                 "Kredensial konfigurasi layanan AI tidak valid atau tidak memiliki akses.",
                 status_code=status_code or 401,
                 original_exception=exc,
             ) from exc
 
-        logger.error(
-            "Kegagalan upstream layanan LLM (model=%s, code=%s): %s",
-            self.model_name,
-            status_code,
-            exc_message,
-        )
         raise SuratAgentUpstreamError(
             f"Terjadi gangguan komunikasi dengan layanan AI upstream: {exc_message}",
             status_code=status_code or 502,
@@ -524,8 +672,7 @@ class SuratDraftingAgent:
         response_schema: Type[BaseModel],
     ) -> Any:
         """
-        Memastikan hasil keluaran LLM tervalidasi secara ketat oleh class Pydantic
-        di `schemas.py` (termasuk seluruh `@field_validator` dan `@model_validator`).
+        Memvalidasi respons mentah LLM ke skema Pydantic.
         """
         if response is None:
             raise SuratAgentValidationError(
@@ -536,17 +683,23 @@ class SuratDraftingAgent:
             parsed_obj = getattr(response, "parsed", None)
             if parsed_obj is not None:
                 if isinstance(parsed_obj, response_schema):
-                    # Validasi ulang melalui model_validate untuk menjamin seluruh validator
-                    # kustom Pydantic dieksekusi secara utuh
                     return response_schema.model_validate(parsed_obj.model_dump())
                 if isinstance(parsed_obj, BaseModel):
                     return response_schema.model_validate(parsed_obj.model_dump())
                 if isinstance(parsed_obj, dict):
                     return response_schema.model_validate(parsed_obj)
+                if hasattr(parsed_obj, "__dict__"):
+                    return response_schema.model_validate(vars(parsed_obj))
 
             raw_text = getattr(response, "text", None)
             if isinstance(raw_text, str) and raw_text.strip():
-                return response_schema.model_validate_json(raw_text.strip())
+                cleaned_text = raw_text.strip()
+                # Bersihkan pembungkus markdown code block ```json ... ``` apabila ada
+                if cleaned_text.startswith("```"):
+                    cleaned_text = re.sub(r"^```(?:json)?\s*", "", cleaned_text, flags=re.IGNORECASE)
+                    cleaned_text = re.sub(r"\s*```$", "", cleaned_text)
+                    cleaned_text = cleaned_text.strip()
+                return response_schema.model_validate_json(cleaned_text)
 
             if isinstance(response, dict):
                 return response_schema.model_validate(response)
@@ -567,28 +720,60 @@ class SuratDraftingAgent:
         kode_surat: str,
         student_metadata: Optional[Dict[str, Any]] = None,
         style_rules: Optional[List[str]] = None,
+        previous_payload: Optional[Dict[str, Any]] = None,
+        previous_draft: Optional[str] = None,
+        revision_notes: Optional[List[str]] = None,
+        previous_score: Optional[int] = None,
+        dynamic_fields_dict: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Any]] = None,
     ) -> BaseModel:
         """
-        Menjalankan alur penyusunan draf surat (Fase 1) beserta mekanisme Self-Reflection:
-        1. Memuat spesifikasi field dari `required_field_surat.json` berdasarkan `kode_surat`.
-        2. Memanggil LLM dengan Structured Outputs yang terikat ke skema Pydantic di `schemas.py`.
-        3. Mengevaluasi `evaluation.self_critique_score`: apabila `< 8`, melakukan maksimal
-           1 kali iterasi perbaikan otomatis menggunakan `evaluation.revision_notes`.
-        4. Mengembalikan instance `AgentSuratDraftOutputSchema` akhir yang siap disimpan ke
-           database dengan status `PENDING_APPROVAL`.
+        Menjalankan alur penyusunan draf surat (Fase 1) beserta Self-Reflection Loop:
+        1. Memuat spesifikasi field (dinamis / JSON / model) & meresolusi `dynamic_fields_dict` dari caller.
+        2. Memanggil LLM dengan Structured Outputs (mendukung teks & dokumen Multimodal).
+        3. Menjalankan verifikasi Zero-Hallucination deterministik: jika terdapat atribut wajib
+           yang belum terisi, otomatis turunkan skor < 8 agar status backend beralih ke REVISION_REQUIRED.
+        4. Menjalankan Self-Reflection Loop otomatis maksimal 1 kali jika skor < 8.
         """
         if not user_prompt_context or not user_prompt_context.strip():
             raise SuratAgentValidationError(
                 "Konteks permohonan surat (user_prompt_context) wajib diisi."
             )
 
-        required_fields = self.get_required_fields_for_kode(kode_surat)
+        effective_dynamic_fields = (
+            dynamic_fields_dict
+            if dynamic_fields_dict is not None
+            else self._discover_caller_dynamic_fields()
+        )
+        effective_attachments = (
+            attachments
+            if attachments is not None
+            else self._discover_caller_attachments()
+        )
+
+        if previous_payload:
+            return self.draft_letter_with_reflection(
+                user_prompt_context=user_prompt_context,
+                kode_surat=kode_surat,
+                previous_draft=previous_draft or "",
+                previous_payload=previous_payload,
+                previous_score=previous_score or 0,
+                revision_notes=revision_notes or [],
+                student_metadata=student_metadata,
+                style_rules=style_rules,
+                dynamic_fields_dict=effective_dynamic_fields,
+                attachments=effective_attachments,
+            )
+
+        required_fields = self.get_required_fields_for_kode(
+            kode_surat, dynamic_fields_dict=effective_dynamic_fields
+        )
         output_schema = self.resolve_output_schema(kode_surat, required_fields)
 
         effective_style_rules = (
             style_rules
             if style_rules is not None
-            else self._load_active_style_rules(kode_surat)
+            else self._load_active_style_rules(kode_surat, student_metadata=student_metadata)
         )
 
         system_prompt = build_system_prompt(
@@ -603,7 +788,7 @@ class SuratDraftingAgent:
         )
 
         logger.info(
-            "Memulai penyusunan draf surat (Iterasi 1) untuk kode_surat=%s menggunakan model=%s.",
+            "Memulai penyusunan draf surat (Iterasi 1) untuk kode_surat=%s model=%s.",
             kode_surat,
             self.model_name,
         )
@@ -611,12 +796,52 @@ class SuratDraftingAgent:
             system_prompt=system_prompt,
             user_prompt=initial_user_prompt,
             response_schema=output_schema,
+            attachments=effective_attachments,
         )
+
+        # DETERMINISTIC ZERO-HALLUCINATION & COMPLETENESS CHECK:
+        first_payload = (
+            first_draft.to_payload_dict()
+            if hasattr(first_draft, "to_payload_dict") and callable(first_draft.to_payload_dict)
+            else first_draft.extracted_payload.model_dump()
+        )
+        slot_mgr = SlotMemoryManager(kode_surat, required_fields, first_payload)
+        missing_fields = slot_mgr.get_missing_fields()
+
+        def _get_first_payload() -> Dict[str, Any]:
+            cleaned = {k: serialize_payload_value(v) for k, v in first_payload.items()}
+            return BackendCompatiblePayloadDict(
+                cleaned,
+                has_incomplete_required_slots=bool(missing_fields),
+            )
+
+        setattr(first_draft, "to_payload_dict", _get_first_payload)
+
+        if missing_fields:
+            # Sesuai Zero-Hallucination Policy: jika data wajib belum lengkap, skor tidak boleh >= 8
+            first_draft.evaluation.self_critique_score = min(
+                first_draft.evaluation.self_critique_score, 7
+            )
+            clarification_notes = slot_mgr.generate_clarification_notes()
+            existing_notes = list(first_draft.evaluation.revision_notes or [])
+            for note in clarification_notes:
+                if note not in existing_notes:
+                    existing_notes.append(note)
+            first_draft.evaluation.revision_notes = existing_notes
+
+            # ZERO-HALLUCINATION GUARD: Apabila skor < 8 disebabkan oleh ketiadaan atribut wajib
+            # dari konteks pengguna, lewati iterasi Self-Reflection karena LLM dilarang keras
+            # mengarang data tanpa informasi eksplisit dari pemohon (menghemat 1 siklus panggilan LLM).
+            logger.info(
+                "Draf surat kekurangan atribut wajib pengguna (%s). Melewati Self-Reflection LLM untuk mencegah halusinasi dan menghemat token.",
+                [item.get("field") for item in missing_fields],
+            )
+            return first_draft
 
         initial_score = first_draft.evaluation.self_critique_score
         if initial_score >= self.critique_min_score or self.max_revisions < 1:
             logger.info(
-                "Draf surat lulus evaluasi Self-Reflection pada Iterasi 1 (skor=%d/%d).",
+                "Draf surat selesai pada Iterasi 1 (skor=%d/%d).",
                 initial_score,
                 self.critique_min_score,
             )
@@ -634,7 +859,7 @@ class SuratDraftingAgent:
             user_prompt_context=user_prompt_context,
             kode_surat=kode_surat,
             previous_draft=first_draft.ai_original_draft,
-            previous_payload=first_draft.to_payload_dict(),
+            previous_payload=first_payload,
             previous_score=initial_score,
             revision_notes=first_draft.evaluation.revision_notes,
             required_fields=required_fields,
@@ -646,13 +871,98 @@ class SuratDraftingAgent:
             response_schema=output_schema,
         )
 
+        # Verifikasi kembali hasil revisi dengan DETERMINISTIC SLOT MERGING
+        # agar parameter valid dari Iterasi 1 tidak hilang jika LLM lupa menyalin ulang
+        raw_revised_payload = (
+            revised_draft.to_payload_dict()
+            if hasattr(revised_draft, "to_payload_dict") and callable(revised_draft.to_payload_dict)
+            else revised_draft.extracted_payload.model_dump()
+        )
+        revised_payload = self.merge_payload_slots(first_payload, raw_revised_payload)
+
+        # Sinkronkan kembali merged payload ke objek revised_draft
+        payload_model_cls = type(revised_draft.extracted_payload)
+        if hasattr(payload_model_cls, "model_validate") and callable(payload_model_cls.model_validate):
+            try:
+                reinforced_payload = payload_model_cls.model_validate(revised_payload)
+                setattr(revised_draft, "extracted_payload", reinforced_payload)
+            except Exception as exc:
+                logger.warning(
+                    "Gagal memvalidasi ulang revised_payload ke model Pydantic: %s.",
+                    exc,
+                )
+        else:
+            setattr(revised_draft, "extracted_payload", revised_payload)
+
+        revised_slot_mgr = SlotMemoryManager(kode_surat, required_fields, revised_payload)
+        revised_missing = revised_slot_mgr.get_missing_fields()
+
+        def _get_revised_merged_payload() -> Dict[str, Any]:
+            cleaned = {k: serialize_payload_value(v) for k, v in revised_payload.items()}
+            return BackendCompatiblePayloadDict(
+                cleaned,
+                has_incomplete_required_slots=bool(revised_missing),
+            )
+
+        setattr(revised_draft, "to_payload_dict", _get_revised_merged_payload)
+
+        if revised_missing:
+            revised_draft.evaluation.self_critique_score = min(
+                revised_draft.evaluation.self_critique_score, 7
+            )
+            revised_clarification = revised_slot_mgr.generate_clarification_notes()
+            current_rev_notes = list(revised_draft.evaluation.revision_notes or [])
+            for note in revised_clarification:
+                if note not in current_rev_notes:
+                    current_rev_notes.append(note)
+            revised_draft.evaluation.revision_notes = current_rev_notes
+
         logger.info(
             "Iterasi perbaikan Self-Reflection selesai (skor awal=%d, skor akhir=%d).",
             initial_score,
             revised_draft.evaluation.self_critique_score,
         )
         return revised_draft
-    
+
+    @classmethod
+    def merge_payload_slots(
+        cls,
+        previous_slots: Optional[Dict[str, Any]],
+        new_slots: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Menggabungkan parameter dari memori sesi sebelumnya dengan parameter baru secara deterministik.
+        Nilai lama yang valid tidak akan hilang atau tertimpa oleh nilai kosong/None/tidak disebutkan.
+        """
+        return SlotMemoryManager.merge_slots(previous_slots, new_slots)
+
+    def check_missing_fields(
+        self,
+        kode_surat: str,
+        payload: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, str]]:
+        """
+        Memeriksa atribut mana saja yang masih kosong pada payload sesuai spesifikasi jenis surat.
+        """
+        required_fields = self.get_required_fields_for_kode(kode_surat)
+        memory_mgr = SlotMemoryManager(
+            kode_surat, required_fields=required_fields, initial_slots=payload
+        )
+        return memory_mgr.get_missing_fields()
+
+    def get_slot_memory_manager(
+        self,
+        kode_surat: str,
+        initial_slots: Optional[Dict[str, Any]] = None,
+    ) -> SlotMemoryManager:
+        """
+        Mengembalikan instance SlotMemoryManager untuk kode surat dan slot awal tertentu.
+        """
+        required_fields = self.get_required_fields_for_kode(kode_surat)
+        return SlotMemoryManager(
+            kode_surat, required_fields=required_fields, initial_slots=initial_slots
+        )
+
     def draft_letter_with_reflection(
         self,
         user_prompt_context: str,
@@ -662,19 +972,177 @@ class SuratDraftingAgent:
         previous_score: int,
         revision_notes: list,
         student_metadata: Optional[dict] = None,
-    ):
+        style_rules: Optional[List[str]] = None,
+        dynamic_fields_dict: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Any]] = None,
+    ) -> BaseModel:
         """
-        Wrapper untuk memproses ulang draf dengan membawa konteks refleksi sebelumnya.
-        Untuk sementara bisa mengarah langsung ke method draft_letter utama atau 
-        menggunakan prompt khusus perbaikan.
+        Memproses ulang draf dengan MEMORI SESI (Conversational Slot-Filling Memory):
+        1. Membersihkan teks konteks dari duplikasi header 'KONTEKS AWAL:'.
+        2. Menginjeksi parameter tersimpan ke prompt re-draft khusus memori.
+        3. Memanggil LLM untuk mengekstrak parameter baru dan menyusun ulang naskah dinas utuh.
+        4. Deterministic Slot Merging: nilai-nilai lama yang valid TIDAK AKAN HILANG.
+        5. Memperbarui evaluasi diri secara objektif berdasarkan kelengkapan faktual.
         """
-        # Karena user_prompt_context di re-draft sudah digabung dengan koreksi baru,
-        # kita bisa langsung melesternya ke method draft_letter utama:
-        return self.draft_letter(
-            user_prompt_context=user_prompt_context,
-            kode_surat=kode_surat,
-            student_metadata=student_metadata,
+        cleaned_context = clean_multiturn_prompt_context(user_prompt_context)
+        if not cleaned_context:
+            raise SuratAgentValidationError(
+                "Konteks permohonan surat (user_prompt_context) wajib diisi untuk re-draft."
+            )
+
+        effective_dynamic_fields = (
+            dynamic_fields_dict
+            if dynamic_fields_dict is not None
+            else self._discover_caller_dynamic_fields()
         )
+
+        required_fields = self.get_required_fields_for_kode(
+            kode_surat, dynamic_fields_dict=effective_dynamic_fields
+        )
+        output_schema = self.resolve_output_schema(kode_surat, required_fields)
+
+        effective_style_rules = (
+            style_rules
+            if style_rules is not None
+            else self._load_active_style_rules(kode_surat, student_metadata=student_metadata)
+        )
+
+        system_prompt = build_system_prompt(
+            kode_surat=kode_surat,
+            required_fields=required_fields,
+            style_rules=effective_style_rules,
+        )
+
+        memory_user_prompt = build_redraft_with_memory_user_prompt(
+            user_prompt_context=cleaned_context,
+            kode_surat=kode_surat,
+            previous_payload=previous_payload or {},
+            revision_notes=revision_notes or [],
+            student_metadata=student_metadata,
+            required_fields=required_fields,
+        )
+
+        logger.info(
+            "Memulai re-draft berbasis memori sesi untuk kode_surat=%s model=%s.",
+            kode_surat,
+            self.model_name,
+        )
+
+        revised_draft: BaseModel = self._invoke_structured_llm(
+            system_prompt=system_prompt,
+            user_prompt=memory_user_prompt,
+            response_schema=output_schema,
+            attachments=attachments,
+        )
+
+        # DETERMINISTIC SLOT MERGE ENGINE:
+        if hasattr(revised_draft, "to_payload_dict") and callable(revised_draft.to_payload_dict):
+            raw_new_payload = revised_draft.to_payload_dict()
+        else:
+            raw_new_payload = revised_draft.extracted_payload.model_dump(mode="json")
+
+        merged_payload = self.merge_payload_slots(previous_payload, raw_new_payload)
+
+        # Sinkronkan kembali merged_payload ke model Pydantic jika memungkinkan
+        payload_model_cls = type(revised_draft.extracted_payload)
+        if hasattr(payload_model_cls, "model_validate") and callable(payload_model_cls.model_validate):
+            try:
+                reinforced_payload = payload_model_cls.model_validate(merged_payload)
+                setattr(revised_draft, "extracted_payload", reinforced_payload)
+            except Exception as exc:
+                logger.warning(
+                    "Gagal memvalidasi ulang merged_payload ke model Pydantic: %s. Menggunakan data mentah.",
+                    exc,
+                )
+        else:
+            setattr(revised_draft, "extracted_payload", merged_payload)
+
+        # Periksa kelengkapan seluruh atribut wajib setelah penggabungan memori
+        slot_mgr = SlotMemoryManager(kode_surat, required_fields, merged_payload)
+        missing_after_merge = slot_mgr.get_missing_fields()
+
+        # Pastikan to_payload_dict mengembalikan BackendCompatiblePayloadDict yang sinkron
+        # dengan pengecekan `has_null_required` di `_execute_redraft_agent_worker` (views.py#L380-L384)
+        def _get_merged_payload() -> Dict[str, Any]:
+            cleaned = {k: serialize_payload_value(v) for k, v in merged_payload.items()}
+            return BackendCompatiblePayloadDict(
+                cleaned,
+                has_incomplete_required_slots=bool(missing_after_merge),
+            )
+
+        setattr(revised_draft, "to_payload_dict", _get_merged_payload)
+
+        if not missing_after_merge:
+            # Seluruh parameter wajib lengkap. Bersihkan peringatan missing fields
+            cleaned_notes = [
+                n
+                for n in (revised_draft.evaluation.revision_notes or [])
+                if "belum disebutkan" not in n.lower()
+                and "tidak disebutkan" not in n.lower()
+                and "belum ada" not in n.lower()
+                and "tidak ada" not in n.lower()
+            ]
+            revised_draft.evaluation.revision_notes = cleaned_notes
+
+            # Karena seluruh parameter wajib faktual kini telah lengkap setelah penggabungan memori,
+            # pastikan skor mencapai ambang kelulusan (>= critique_min_score) agar tidak terjebak
+            # di status REVISION_REQUIRED secara keliru
+            if revised_draft.evaluation.self_critique_score < self.critique_min_score:
+                revised_draft.evaluation.self_critique_score = self.critique_min_score
+            logger.info(
+                "Re-draft berhasil melengkapi seluruh parameter memori untuk kode_surat=%s (skor=%d).",
+                kode_surat,
+                revised_draft.evaluation.self_critique_score,
+            )
+        else:
+            # Masih ada parameter yang belum lengkap, pertahankan skor < 8
+            revised_draft.evaluation.self_critique_score = min(
+                revised_draft.evaluation.self_critique_score, 7
+            )
+            specific_notes = slot_mgr.generate_clarification_notes()
+            existing_notes = list(revised_draft.evaluation.revision_notes or [])
+            for note in specific_notes:
+                if note not in existing_notes:
+                    existing_notes.append(note)
+            revised_draft.evaluation.revision_notes = existing_notes
+            logger.info(
+                "Re-draft masih kekurangan parameter: %s",
+                [item.get("field") for item in missing_after_merge],
+            )
+
+        return revised_draft
+
+    def is_draft_ready_for_approval(
+        self,
+        draft_output: Any,
+        kode_surat: str,
+        dynamic_fields_dict: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Method siap panggil untuk Backend (`views.py`) guna memeriksa apakah hasil draf AI
+        sudah siap masuk ke `PENDING_APPROVAL` (`True`) atau harus masuk ke `REVISION_REQUIRED` (`False`).
+        """
+        from surat.agents.backend_bridge import evaluate_draft_readiness
+
+        res = evaluate_draft_readiness(
+            draft_output=draft_output,
+            kode_surat=kode_surat,
+            dynamic_fields_dict=dynamic_fields_dict,
+            min_score=self.critique_min_score,
+        )
+        return bool(res["is_ready_for_approval"])
+
+    @staticmethod
+    def extract_dynamic_fields_from_surat_type(
+        surat_type: Any,
+    ) -> Optional[Dict[str, str]]:
+        """
+        Method siap panggil untuk Backend (`views.py#L692`) guna mengambil field dinamis
+        dari objek `SuratType` (`required_payload_fields`).
+        """
+        from surat.agents.backend_bridge import extract_dynamic_fields_from_surat_type
+
+        return extract_dynamic_fields_from_surat_type(surat_type)
 
     def run(
         self,
@@ -682,6 +1150,12 @@ class SuratDraftingAgent:
         kode_surat: str,
         student_metadata: Optional[Dict[str, Any]] = None,
         style_rules: Optional[List[str]] = None,
+        previous_payload: Optional[Dict[str, Any]] = None,
+        previous_draft: Optional[str] = None,
+        revision_notes: Optional[List[str]] = None,
+        previous_score: Optional[int] = None,
+        dynamic_fields_dict: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Any]] = None,
     ) -> BaseModel:
         """Alias eksekusi utama yang memanggil `draft_letter`."""
         return self.draft_letter(
@@ -689,4 +1163,10 @@ class SuratDraftingAgent:
             kode_surat=kode_surat,
             student_metadata=student_metadata,
             style_rules=style_rules,
+            previous_payload=previous_payload,
+            previous_draft=previous_draft,
+            revision_notes=revision_notes,
+            previous_score=previous_score,
+            dynamic_fields_dict=dynamic_fields_dict,
+            attachments=attachments,
         )

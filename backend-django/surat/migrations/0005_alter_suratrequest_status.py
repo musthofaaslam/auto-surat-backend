@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='suratrequest',
             name='status',
-            field=models.CharField(choices=[('PENDING_APPROVAL', 'Pending Approval (Menunggu Tinjauan Draf AI)'), ('SUBMITTED', 'Submitted (Diajukan)'), ('IN_REVIEW', 'In Review (Dalam Proses Persetujuan Berjenjang)'), ('APPROVED', 'Approved (Disetujui)'), ('REJECTED', 'Rejected (Ditolak)'), ('SENT', 'Sent (Terkirim via Email)'), ('PRINTED', 'Printed (Dicetak)'), ('FAILED', 'Failed (Gagal Eksekusi Pipeline)'), ('REVISION_REQUESTED', 'Revision Requested (Revisi Draf AI Diminta)')], db_index=True, default='PENDING_APPROVAL', max_length=50),
+            field=models.CharField(choices=[('PENDING_APPROVAL', 'Pending Approval (Menunggu Tinjauan Draf AI)'), ('SUBMITTED', 'Submitted (Diajukan)'), ('IN_REVIEW', 'In Review (Dalam Proses Persetujuan Berjenjang)'), ('APPROVED', 'Approved (Disetujui)'), ('REJECTED', 'Rejected (Ditolak)'), ('SENT', 'Sent (Terkirim via Email)'), ('PRINTED', 'Printed (Dicetak)'), ('FAILED', 'Failed (Gagal Eksekusi Pipeline)'), ('REVISION_REQUIRED', 'Revision Required (Perlu Revisi / Data Belum Lengkap)'), ('REVISION_REQUESTED', 'Revision Requested (Revisi Draf AI Diminta)')], db_index=True, default='PENDING_APPROVAL', max_length=50),
         ),
     ]

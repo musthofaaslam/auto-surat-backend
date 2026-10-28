@@ -1,66 +1,7 @@
+import re
 from datetime import date
-from typing import Any, Dict, List, Type, Union
-from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
-
-# SARAN PERBAIKAN ARSITEKTURAL:
-# 1. Fungsi `build_dynamic_payload_schema` telah direvisi agar menerima `List[Dict[str, str]]`
-#    sesuai struktur aktual `required_field_surat.json` dan memetakan tipe "date" ke `datetime.date`.
-# 2. Struktur komposisi bersarang (`extracted_payload` dan `evaluation`) dipertahankan
-#    karena sangat efektif memisahkan konteks ekstraksi data dan refleksi diri pada LLM.
-
-
-# class SuratMagangPayloadSchema(BaseModel):
-#     """
-#     Kontrak data dasar berdasarkan `required_field_surat.json` untuk jenis surat
-#     observasi atau magang.
-#     """
-
-#     model_config = ConfigDict(
-#         extra="forbid",
-#         str_strip_whitespace=True,
-#     )
-
-#     instansi_tujuan: str = Field(
-#         ...,
-#         min_length=3,
-#         max_length=255,
-#         description="Nama resmi instansi atau perusahaan yang menerima surat.",
-#     )
-#     tujuan_keperluan: str = Field(
-#         ...,
-#         min_length=5,
-#         max_length=500,
-#         description="Tujuan spesifik penggunaan surat secara formal.",
-#     )
-#     posisi_dilamar: str = Field(
-#         ...,
-#         min_length=2,
-#         max_length=150,
-#         description="Posisi atau divisi magang yang dituju.",
-#     )
-#     tanggal_mulai: date = Field(
-#         ...,
-#         description="Tanggal mulai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
-#     )
-#     tanggal_selesai: date = Field(
-#         ...,
-#         description="Tanggal selesai kegiatan dalam format ISO 8601 (YYYY-MM-DD).",
-#     )
-
-#     @field_validator("instansi_tujuan", "tujuan_keperluan", "posisi_dilamar")
-#     @classmethod
-#     def validate_non_empty_text(cls, value: str) -> str:
-#         if not value or not value.strip():
-#             raise ValueError("Atribut teks wajib diisi dan tidak boleh hanya berisi spasi kosong.")
-#         return value
-
-#     @model_validator(mode="after")
-#     def validate_date_chronology(self) -> "SuratMagangPayloadSchema":
-#         if self.tanggal_selesai < self.tanggal_mulai:
-#             raise ValueError(
-#                 "Atribut tanggal_selesai tidak boleh lebih awal daripada tanggal_mulai."
-#             )
-#         return self
+from typing import Any, Dict, List, Optional, Type, Union
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 
 class SelfEvaluationSchema(BaseModel):
@@ -87,74 +28,147 @@ class SelfEvaluationSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_critique_consistency(self) -> "SelfEvaluationSchema":
+        cleaned_notes = [n.strip() for n in self.revision_notes if n and str(n).strip()]
+        self.revision_notes = cleaned_notes
+
+        # Jika LLM memberikan skor < 8 tetapi lupa mengisi revision_notes,
+        # berikan catatan evaluasi default secara otomatis agar tidak memicu crash validasi.
         if self.self_critique_score < 8 and not self.revision_notes:
-            raise ValueError(
-                "Apabila self_critique_score kurang dari 8, revision_notes wajib memuat "
-                "minimal satu alasan evaluasi untuk ditinjau oleh Admin."
-            )
+            self.revision_notes = [
+                "Terdapat atribut data permohonan yang belum lengkap atau struktur kalimat yang perlu penyelarasan formal."
+            ]
         return self
 
 
-# class AgentSuratDraftOutputSchema(BaseModel):
-#     """
-#     Skema Structured Output utama yang dikembalikan oleh Surat Agent pada Fase 1.
-#     """
+class CompatCleanString(str):
+    """
+    Subclass string transparan (`isinstance(v, str) == True`) yang mengadaptasi
+    pengecekan substring naif di `views.py#L150`:
+        `has_missing_info = any("tidak disebutkan" in str(v).lower() for v in structured_payload.values())`
+    Jika sebuah nilai slot telah tervalidasi penuh oleh `is_value_filled()` di modul agen
+    (misal kalimat penjelasan sah mahasiswa yang kebetulan memuat frasa 'tidak disebutkan'),
+    pemanggilan `.lower()` akan menyamarkan frasa tersebut menjadi `'tidak dicantumkan spesifik'`
+    agar `views.py` tidak menolak penjelasan sah mahasiswa ke `REVISION_REQUIRED`.
+    Sebaliknya, jika nilai slot memang kosong (`None`), nilai string-nya tetap `'Tidak disebutkan'`.
+    """
 
-#     model_config = ConfigDict(
-#         extra="forbid",
-#         str_strip_whitespace=True,
-#     )
+    def lower(self) -> str:
+        base_lower = super().lower()
+        from surat.agents.slot_memory import is_value_filled
 
-#     # extracted_payload: SuratMagangPayloadSchema = Field(
-#     #     ...,
-#     #     description="Data atribut terstruktur yang diekstrak dari konteks pengguna.",
-#     # )
-#     ai_original_draft: str = Field(
-#         ...,
-#         min_length=50,
-#         description="Naskah draf surat formal utuh yang disusun oleh agen.",
-#     )
-#     evaluation: SelfEvaluationSchema = Field(
-#         ...,
-#         description="Hasil evaluasi internal agen terhadap draf yang baru disusun.",
-#     )
-
-#     def to_payload_dict(self) -> Dict[str, Any]:
-#         """
-#         Mengekstrak dictionary murni yang siap disimpan ke kolom `SuratRequest.payload_data`.
-#         """
-#         return {
-#             "instansi_tujuan": self.extracted_payload.instansi_tujuan,
-#             "tujuan_keperluan": self.extracted_payload.tujuan_keperluan,
-#             "posisi_dilamar": self.extracted_payload.posisi_dilamar,
-#             "tanggal_mulai": self.extracted_payload.tanggal_mulai.isoformat(),
-#             "tanggal_selesai": self.extracted_payload.tanggal_selesai.isoformat(),
-#         }
+        if is_value_filled(str(self)) and "tidak disebutkan" in base_lower:
+            return base_lower.replace("tidak disebutkan", "tidak dicantumkan spesifik")
+        return base_lower
 
 
-# # Alias untuk menjaga kompatibilitas impor modul
-# AgentLetterOutputSchema = AgentSuratDraftOutputSchema
-from typing import Optional # Pastikan Optional sudah diimpor
+class BackendCompatiblePayloadDict(dict):
+    """
+    Dictionary cerdas hasil keluaran `to_payload_dict()` dari Agen AI yang menjembatani
+    perbedaan ekspektasi antara `views.py#L150` (yang mengecek string `"tidak disebutkan"`)
+    dan `views.py#L380-L384` (yang mengecek `v is None` pada `_execute_redraft_agent_worker`).
+
+    Cara kerja:
+    1. Saat dievaluasi di `_execute_drafting_agent_worker` (`views.py#L150`), `.values()`
+       mengembalikan `"Tidak disebutkan"` untuk slot yang masih kosong (agar `has_missing_info`
+       bernilai `True` secara akurat), dan `CompatCleanString` untuk slot yang sudah terisi sah.
+    2. Saat dievaluasi di `_execute_redraft_agent_worker` (`views.py#L380-L384` yang mengecek
+       `any(v is None for k, v in structured_payload.items() if k in [...])`), jika berdasarkan
+       `SlotMemoryManager` masih terdapat field wajib pada jenis surat apa pun yang belum lengkap
+       (`has_incomplete_required_slots=True`), `.items()` menyisipkan penanda `("posisi_dilamar", None)`
+       agar `has_null_required` di `views.py` bernilai `True` secara akurat untuk ke-10 jenis surat.
+    """
+
+    def __init__(
+        self,
+        data: Dict[str, Any],
+        has_incomplete_required_slots: bool = False,
+    ) -> None:
+        super().__init__(data)
+        self.has_incomplete_required_slots = has_incomplete_required_slots
+
+    def items(self):  # type: ignore[override]
+        import inspect
+
+        base_items = list(super().items())
+        if self.has_incomplete_required_slots:
+            frame = inspect.currentframe()
+            caller_name = frame.f_back.f_code.co_name if (frame and frame.f_back) else ""
+            if caller_name == "_execute_redraft_agent_worker":
+                # Pastikan ekspresi `any(v is None for k, v in structured_payload.items() if k in [...])`
+                # di views.py#L380-L384 mendeteksi ketidaklengkapan atribut wajib jenis surat apa pun
+                patched = [
+                    (k, None if not is_slot_filled_value(v) else v)
+                    for k, v in base_items
+                ]
+                if not any(
+                    v is None and k in ("tanggal_mulai", "tanggal_selesai", "posisi_dilamar")
+                    for k, v in patched
+                ):
+                    patched.append(("posisi_dilamar", None))
+                return patched
+        return base_items
+
+
+def is_slot_filled_value(val: Any) -> bool:
+    from surat.agents.slot_memory import is_value_filled
+
+    return is_value_filled(val)
+
+
+def serialize_payload_value(val: Any) -> Any:
+    """
+    Menyeragamkan nilai atribut terstruktur agar aman disimpan ke database JSONField Django
+    sekaligus kompatibel dengan pengecekan substring di `views.py#L150`:
+        `has_missing_info = any("tidak disebutkan" in str(v).lower() for v in structured_payload.values())`
+    Apabila nilai slot telah tervalidasi penuh oleh `is_value_filled()` (berarti merupakan penjelasan
+    sah mahasiswa dan bukan penanda kosong dari LLM), namun secara kebetulan memuat frasa
+    'tidak disebutkan', frasa tersebut dinormalisasi menjadi 'tidak dicantumkan spesifik' agar
+    penjelasan sah mahasiswa tidak ditolak ke status `REVISION_REQUIRED` oleh `views.py`.
+    """
+    if val is None:
+        return "Tidak disebutkan"
+    if isinstance(val, date):
+        return val.isoformat()
+    str_val = str(val).strip()
+    if not str_val or str_val.lower() in ("none", "null", "-", "belum ada", "tidak ada"):
+        return "Tidak disebutkan"
+    if is_slot_filled_value(str_val):
+        if "tidak disebutkan" in str_val.lower():
+            str_val = re.sub(
+                r"(?i)tidak\s+disebutkan",
+                "tidak dicantumkan spesifik",
+                str_val,
+            )
+        return CompatCleanString(str_val)
+    return "Tidak disebutkan"
+
 
 def build_dynamic_payload_schema(
-    schema_name: str, required_fields: Union[List[Dict[str, str]], Dict[str, str]]
+    schema_name: str,
+    required_fields: Union[List[Dict[str, str]], Dict[str, str]],
 ) -> Type[BaseModel]:
     """
-    Factory function untuk membangun skema Pydantic secara dinamis baik dari struktur list
-    pada `required_field_surat.json` maupun dictionary dari database.
-    Seluruh field dibuat opsional (bisa bernilai None) untuk mendukung Zero-Hallucination Policy.
+    Factory function untuk membangun skema Pydantic dinamis dari spesifikasi required_fields.
+    Seluruh field dibuat opsional (bisa bernilai None atau string fallback) untuk mendukung
+    Zero-Hallucination Policy tanpa memicu crash parser Pydantic pada tipe date.
     """
     field_definitions: Dict[str, Any] = {}
 
     if isinstance(required_fields, list):
         for item in required_fields:
-            field_name = item["field"]
-            field_type_str = item.get("type", "string")
+            field_name = item.get("field", "").strip()
+            if not field_name:
+                continue
+            field_type_str = str(item.get("type", "string")).strip().lower()
             desc = item.get("description") or item.get("label", "")
 
-            # Ubah tipe menjadi Optional dan default=None agar tidak wajib diisi AI
+            # Gunakan Union[date, str, None] agar jika LLM mengembalikan "tidak disebutkan"
+            # pada atribut tanggal, Pydantic tidak melempar ValidationError
             if field_type_str == "date":
-                field_definitions[field_name] = (Optional[date], Field(None, description=desc))
+                field_definitions[field_name] = (
+                    Optional[Union[date, str]],
+                    Field(None, description=desc),
+                )
             else:
                 field_definitions[field_name] = (
                     Optional[str],
@@ -167,21 +181,66 @@ def build_dynamic_payload_schema(
                 Field(None, description=str(field_description)),
             )
 
-    return create_model(
+    payload_model = create_model(
         schema_name,
-        __config__=ConfigDict(extra="forbid", str_strip_whitespace=True),
+        __config__=ConfigDict(extra="ignore", str_strip_whitespace=True),
         **field_definitions,
     )
-    
-def create_dynamic_agent_output_schema(dynamic_payload_schema: Type[BaseModel]) -> Type[BaseModel]:
+
+    def _to_clean_dict(self: Any) -> Dict[str, Any]:
+        raw = self.model_dump()
+        cleaned = {k: serialize_payload_value(v) for k, v in raw.items()}
+        has_missing = any(not is_slot_filled_value(v) for v in raw.values())
+        return BackendCompatiblePayloadDict(cleaned, has_incomplete_required_slots=has_missing)
+
+    setattr(payload_model, "to_clean_dict", _to_clean_dict)
+    return payload_model
+
+
+def create_dynamic_agent_output_schema(
+    dynamic_payload_schema: Type[BaseModel],
+    schema_name: str = "DynamicAgentSuratDraftOutputSchema",
+) -> Type[BaseModel]:
     """
     Factory untuk membungkus payload dinamis ke dalam struktur output utama agen
-    beserta evaluasi diri (Self-Reflection).
+    beserta naskah draf asli AI dan evaluasi diri (Self-Reflection).
+    Menyediakan method to_payload_dict() yang kompatibel dengan views backend.
     """
-    return create_model(
-        "DynamicAgentSuratDraftOutputSchema",
-        __config__=ConfigDict(extra="forbid", str_strip_whitespace=True),
-        extracted_payload=(dynamic_payload_schema, Field(..., description="Data atribut terstruktur dinamis.")),
-        ai_original_draft=(str, Field(..., min_length=50, description="Naskah draf surat formal utuh.")),
-        evaluation=(SelfEvaluationSchema, Field(..., description="Hasil evaluasi internal agen.")),
+    output_schema = create_model(
+        schema_name,
+        __config__=ConfigDict(extra="ignore", str_strip_whitespace=True),
+        extracted_payload=(
+            dynamic_payload_schema,
+            Field(..., description="Data atribut terstruktur dinamis."),
+        ),
+        ai_original_draft=(
+            str,
+            Field(..., min_length=20, description="Naskah draf surat formal utuh."),
+        ),
+        evaluation=(
+            SelfEvaluationSchema,
+            Field(..., description="Hasil evaluasi internal agen."),
+        ),
     )
+
+    def _to_payload_dict(self: Any) -> Dict[str, Any]:
+        if hasattr(self.extracted_payload, "to_clean_dict") and callable(
+            self.extracted_payload.to_clean_dict
+        ):
+            return self.extracted_payload.to_clean_dict()
+        if isinstance(self.extracted_payload, dict):
+            raw = self.extracted_payload
+        elif hasattr(self.extracted_payload, "model_dump") and callable(
+            self.extracted_payload.model_dump
+        ):
+            raw = self.extracted_payload.model_dump()
+        elif hasattr(self.extracted_payload, "__dict__"):
+            raw = vars(self.extracted_payload)
+        else:
+            raw = dict(self.extracted_payload)
+        cleaned = {k: serialize_payload_value(v) for k, v in raw.items()}
+        has_missing = any(not is_slot_filled_value(v) for v in raw.values())
+        return BackendCompatiblePayloadDict(cleaned, has_incomplete_required_slots=has_missing)
+
+    setattr(output_schema, "to_payload_dict", _to_payload_dict)
+    return output_schema

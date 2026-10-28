@@ -1,6 +1,7 @@
 import difflib
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Type
 
 try:
@@ -377,10 +378,17 @@ class AgenticMemoryAgent:
                     return response_schema.model_validate(parsed_obj.model_dump())
                 if isinstance(parsed_obj, dict):
                     return response_schema.model_validate(parsed_obj)
+                if hasattr(parsed_obj, "__dict__"):
+                    return response_schema.model_validate(vars(parsed_obj))
 
             raw_text = getattr(response, "text", None)
             if isinstance(raw_text, str) and raw_text.strip():
-                return response_schema.model_validate_json(raw_text.strip())
+                cleaned_text = raw_text.strip()
+                if cleaned_text.startswith("```"):
+                    cleaned_text = re.sub(r"^```(?:json)?\s*", "", cleaned_text, flags=re.IGNORECASE)
+                    cleaned_text = re.sub(r"\s*```$", "", cleaned_text)
+                    cleaned_text = cleaned_text.strip()
+                return response_schema.model_validate_json(cleaned_text)
 
             if isinstance(response, dict):
                 return response_schema.model_validate(response)
@@ -431,9 +439,13 @@ class AgenticMemoryAgent:
             status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
             exc_text = str(exc).lower()
             is_retriable_model_issue = (
-                status_code in (404, 503)
+                status_code in (404, 429, 503)
                 or "404" in exc_text
                 or "not_found" in exc_text
+                or "429" in exc_text
+                or "resource_exhausted" in exc_text
+                or "quota" in exc_text
+                or "rate limit" in exc_text
                 or "503" in exc_text
                 or "high demand" in exc_text
             )
@@ -469,13 +481,64 @@ class AgenticMemoryAgent:
         return self._parse_and_validate_response(response, MemoryDiffEvaluationSchema)
 
     @staticmethod
+    def _sanitize_pii_from_text(text: str) -> str:
+        """
+        Menyensor informasi identitas pribadi (PII) seperti NIM, NIP, nomor telepon,
+        email, tanggal spesifik, dan nilai setelah label biodata (Nama/NIM/Alamat)
+        agar tidak pernah bocor ke dalam aturan gaya bahasa umum (System Prompt).
+        """
+        if not text:
+            return ""
+        sanitized = text
+        # Sensor label biodata spesifik beserta nilainya (misal: "Nama: Andi Pratama", "NIM : 240601...")
+        sanitized = re.sub(
+            r"(?i)\b(nama(?:\s+mahasiswa|\s+lengkap)?|nim|nip|nik|tempat\s*,?\s*tanggal\s+lahir|ttl|alamat|no\.?\s*(?:hp|telp|telepon|wa)|telepon|hp|email)\s*[:=]\s*[^\n,;()]+",
+            r"\1: [DATA_MAHASISWA]",
+            sanitized,
+        )
+        # Sensor alamat email
+        sanitized = re.sub(
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+            "[EMAIL]",
+            sanitized,
+        )
+        # Sensor nomor telepon / WA (08xx, +628xx, 628xx)
+        sanitized = re.sub(
+            r"(?:\+62|62|0)8[0-9]{7,12}\b",
+            "[NO_TELP]",
+            sanitized,
+        )
+        # Sensor deretan angka panjang >= 8 digit (NIM / NIP / NIK / Nomor Akun)
+        sanitized = re.sub(r"\b\d{8,20}\b", "[NOMOR_IDENTITAS]", sanitized)
+        return sanitized.strip()
+
+    @classmethod
+    def _is_purely_biodata_or_pii_line(cls, line: str) -> bool:
+        """
+        Mendeteksi apakah suatu baris diff semata-mata berisi pengisian biodata/identitas
+        mahasiswa dan bukan perubahan struktur kalimat redaksional surat.
+        """
+        stripped = line.strip()
+        if not stripped:
+            return True
+        if re.match(
+            r"(?i)^(nama(?:\s+mahasiswa|\s+lengkap)?|nim|nip|nik|tempat\s*,?\s*tanggal\s+lahir|ttl|alamat|no\.?\s*(?:hp|telp|telepon|wa)|telepon|hp|email|ipk|semester|program\s+studi|prodi|fakultas)\s*[:=]",
+            stripped,
+        ):
+            return True
+        return False
+
+    @classmethod
     def _build_heuristic_fallback_evaluation(
+        cls,
         diff_meta: Dict[str, Any],
         kode_surat: str,
     ) -> MemoryDiffEvaluationSchema:
         """
         Fallback deterministik apabila API Key tidak tersedia di environment lokal/pengujian
         namun terdapat perbedaan nyata antara draf asli AI dan teks final Admin.
+        Dilengkapi filter anti-PII agar data pribadi mahasiswa tidak pernah bocor ke
+        tabel `AgentFeedbackMemory` maupun System Prompt mahasiswa lain.
         """
         ratio = diff_meta.get("similarity_ratio", 1.0)
         unified_diff = diff_meta.get("unified_diff", "")
@@ -484,14 +547,27 @@ class AgenticMemoryAgent:
             for line in unified_diff.splitlines()
             if line.startswith("+") and not line.startswith("+++") and line[1:].strip()
         ]
-        sample_addition = added_lines[0][:180] if added_lines else "Perubahan redaksi kalimat formal."
+
+        # Saring baris yang murni merupakan atribut biodata/PII mahasiswa
+        stylistic_lines = [
+            line for line in added_lines if not cls._is_purely_biodata_or_pii_line(line)
+        ]
+
+        if stylistic_lines:
+            sanitized_sample = cls._sanitize_pii_from_text(stylistic_lines[0])[:180]
+            rule = (
+                f"Utamakan gaya redaksi dan struktur kalimat formal sesuai koreksi Pejabat "
+                f"pada {kode_surat}: {sanitized_sample}"
+            )
+        else:
+            rule = (
+                f"Utamakan struktur kalimat baku, tata letak biodata rapi, dan diksi formal "
+                f"sesuai standar koreksi Pejabat pada {kode_surat}."
+            )
+
         summary = (
             f"Terdeteksi revisi redaksional oleh Pejabat/Admin pada kode surat {kode_surat} "
             f"(rasio kemiripan={ratio:.2f})."
-        )
-        rule = (
-            f"Utamakan gaya redaksi dan struktur kalimat sesuai koreksi Pejabat pada {kode_surat}: "
-            f"{sample_addition}"
         )
         return MemoryDiffEvaluationSchema(
             is_significant=True,
@@ -549,7 +625,30 @@ class AgenticMemoryAgent:
             self.model_name,
             diff_meta["similarity_ratio"],
         )
-        return self._invoke_diff_llm(user_prompt=user_prompt)
+        evaluation = self._invoke_diff_llm(user_prompt=user_prompt)
+
+        # Sanitasi PII/biodata pasca-LLM sebagai pengaman lapis kedua (Defense-in-Depth)
+        # agar meskipun LLM tidak sengaja menyalin NIM/nama/telepon ke dalam aturan,
+        # data privat mahasiswa tetap disensor sebelum masuk ke AgentFeedbackMemory.
+        if evaluation.extracted_rule:
+            sanitized_rule = self._sanitize_pii_from_text(evaluation.extracted_rule)
+            if self._is_purely_biodata_or_pii_line(sanitized_rule):
+                return MemoryDiffEvaluationSchema(
+                    is_significant=False,
+                    diff_summary="Perubahan terdeteksi hanya mencakup koreksi biodata spesifik pemohon.",
+                    extracted_rule="",
+                    style_guidelines=[],
+                )
+            evaluation.extracted_rule = sanitized_rule
+
+        if evaluation.style_guidelines:
+            evaluation.style_guidelines = [
+                self._sanitize_pii_from_text(g)
+                for g in evaluation.style_guidelines
+                if g and not self._is_purely_biodata_or_pii_line(g)
+            ]
+
+        return evaluation
 
     def record_feedback_memory(
         self,
@@ -595,11 +694,27 @@ class AgenticMemoryAgent:
             )
             return None
 
+        clean_rule = evaluation.extracted_rule.strip()
+        existing_rule = AgentFeedbackMemory.objects.filter(
+            kode_surat=surat_type_obj,
+            is_active=True,
+            extracted_rule__iexact=clean_rule,
+        ).first()
+
+        if existing_rule is not None:
+            logger.info(
+                "Aturan gaya bahasa serupa sudah tersimpan (id=%s) untuk kode_surat=%s. "
+                "Penyimpanan duplikat dilewati.",
+                existing_rule.id,
+                kode_surat_str,
+            )
+            return existing_rule
+
         memory_record = AgentFeedbackMemory.objects.create(
             surat_request=surat_request,
             kode_surat=surat_type_obj,
             diff_summary=evaluation.diff_summary,
-            extracted_rule=evaluation.extracted_rule.strip(),
+            extracted_rule=clean_rule,
             is_active=True,
         )
 

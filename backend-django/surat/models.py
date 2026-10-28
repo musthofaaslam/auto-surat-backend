@@ -25,7 +25,8 @@ class SuratStatus(models.TextChoices):
     SENT = "SENT", "Sent (Terkirim via Email)"
     PRINTED = "PRINTED", "Printed (Dicetak)"
     FAILED = "FAILED", "Failed (Gagal Eksekusi Pipeline)"
-    RVISION_REQUESTED = "REVISION_REQUESTED", "Revision Requested (Revisi Draf AI Diminta)"
+    REVISION_REQUIRED = "REVISION_REQUIRED", "Revision Required (Perlu Revisi / Data Belum Lengkap)"
+    REVISION_REQUESTED = "REVISION_REQUESTED", "Revision Requested (Revisi Draf AI Diminta)"
 
 
 class ApprovalStatus(models.TextChoices):
