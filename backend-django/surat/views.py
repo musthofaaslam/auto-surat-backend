@@ -133,7 +133,7 @@ def _execute_drafting_agent_worker(
             user_prompt_context=user_prompt_context,
             kode_surat=kode_surat,
             student_metadata=student_metadata,
-            dynamic_fields=dynamic_fields_dict
+            # dynamic_fields=dynamic_fields_dict
         )
 
         if hasattr(draft_output, "to_payload_dict") and callable(draft_output.to_payload_dict):
