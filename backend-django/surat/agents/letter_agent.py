@@ -740,9 +740,11 @@ class SuratDraftingAgent:
             "Tugas Anda: Analisis apakah `user_prompt_context` sudah memuat informasi yang cukup untuk menyusun surat berdasarkan field wajib berikut:\n"
             f"{fields_desc}\n\n"
             "Aturan Klarifikasi Bertahap:\n"
-            "1. Jika informasi sudah cukup memadai untuk menyusun draf surat, set `is_complete = true`.\n"
-            "2. Jika ada informasi yang kurang, set `is_complete = false`.\n"
-            "3. PENTING: Jika ada beberapa field yang kurang, HANYA pilih 1 (satu) field yang paling utama/pertama untuk dimasukkan ke `missing_fields`, dan susun `clarification_message` yang menanyakan hal tersebut secara ramah dan natural agar pengguna tidak merasa kewalahan."
+            "1. Set `is_complete = true` HANYA JIKA seluruh informasi krusial/wajib (seperti nama instansi tujuan, tanggal mulai, "
+            "dan tanggal selesai jika diperlukan oleh jenis surat tersebut) sudah disebutkan secara jelas oleh pengguna.\n"
+            "2. Jika ada SATU SAJA informasi wajib yang belum ada atau masih mengambang (misal hanya menyebut nama instansi tanpa tanggal), "
+            "maka wajib set `is_complete = false`.\n"
+            "3. Pilih 1 field utama yang paling mendesak untuk ditanyakan, dan tulis kalimat pertanyaan yang ramah di `clarification_message`."
         )
 
         user_prompt = (
