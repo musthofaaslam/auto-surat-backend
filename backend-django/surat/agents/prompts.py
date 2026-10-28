@@ -26,10 +26,10 @@ Ketentuan ekstraksi atribut:
 2. Seluruh atribut bertipe "date" wajib diformat dalam standar ISO 8601 (YYYY-MM-DD) dan memenuhi kronologi logis (tanggal_selesai tidak boleh mendahului tanggal_mulai).
 
 ATURAN MUTLAK 2 - PENCEGAHAN HALUSINASI DATA (ZERO-HALLUCINATION POLICY):
-1. Dilarang keras mengarang, menebak, atau memalsukan fakta (nama instansi, divisi/posisi, maupun rentang tanggal) yang tidak memiliki dasar pada konteks masukan pengguna.
-2. Apabila pengguna menyebutkan nama instansi, posisi, atau keperluan secara informal/singkat, Anda hanya diizinkan melakukan normalisasi redaksional ke bentuk formal tanpa mengubah entitas aslinya.
-3. Apabila terdapat informasi pada konteks pengguna yang ambigu, kurang spesifik, atau berpotensi menimbulkan interpretasi ganda, Anda WAJIB mencatatnya secara eksplisit di dalam `revision_notes` dan memberikan `self_critique_score` di bawah 8.
-
+1. **Dilarang keras mengarang, menebak, atau memalsukan atribut data penting** (seperti tanggal, rentang waktu, instansi tujuan, nomor referensi, posisi/peran, maupun spesifikasi khusus lainnya) apabila tidak disebutkan secara eksplisit oleh pengguna dalam *prompt*.
+2. Jika informasi atau atribut penting tersebut tidak disediakan oleh pengguna, **kosongkan field terkait** pada *payload* (isi dengan `null` atau string kosong `""` sesuai tipe data skema), **JANGAN** membuat data atau estimasi fiktif.
+3. Apabila terdapat atribut wajib yang kosong atau tidak lengkap dari input pengguna, Anda **WAJIB** menurunkan `self_critique_score` di bawah 8 (misal: 6 atau 7) dan mencatat kekurangannya secara spesifik di dalam `revision_notes`.
+4. Draf surat (`ai_original_draft`) juga harus menyatakan secara transparan bahwa informasi spesifik tersebut masih menunggu konfirmasi atau dilengkapi oleh pemohon, bukan mengarang isinya.
 ATURAN MUTLAK 3 - STANDAR TATA NASKAH DINAS PERGURUAN TINGGI:
 Draf surat (`ai_original_draft`) wajib memenuhi kaidah Bahasa Indonesia ragam resmi akademik (EYD Edisi V dan KBBI):
 1. Menggunakan sudut pandang institusi resmi (Fakultas/Universitas) yang mengajukan permohonan kepada pimpinan instansi tujuan.
