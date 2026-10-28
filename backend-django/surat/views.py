@@ -52,6 +52,7 @@ from .serializers import (
     SuratTypeSerializer,
     SuratVerifyInvalidResponseSerializer,
     SuratVerifyValidResponseSerializer,
+    ReDraftSuratRequestSerializer,
 )
 from .services.workflow_service import process_approval_action
 
@@ -339,7 +340,223 @@ def _execute_approval_pipeline_worker(
     finally:
         close_old_connections()
 
+def _execute_redraft_agent_worker(
+    surat_request_id: int,
+    user_prompt_context: str,
+    kode_surat: str,
+    previous_draft: str,
+    previous_payload: dict,
+    previous_score: int,
+    revision_notes: list,
+    student_metadata: dict
+) -> None:
+    """
+    Worker asinkron untuk memproses ulang penyusunan draf surat (Self-Reflection Re-draft)
+    ketika pengguna memberikan informasi tambahan berdasarkan revision_notes.
+    """
+    close_old_connections()
+    try:
+        surat_req = SuratRequest.objects.get(pk=surat_request_id)
+        
+        active_agent = SuratDraftingAgent()
+        # Memanggil fungsi revisi iteratif agen
+        draft_output = active_agent.draft_letter_with_reflection(
+            user_prompt_context=user_prompt_context,
+            kode_surat=kode_surat,
+            previous_draft=previous_draft,
+            previous_payload=previous_payload,
+            previous_score=previous_score,
+            revision_notes=revision_notes,
+            student_metadata=student_metadata,
+        )
 
+        if hasattr(draft_output, "to_payload_dict") and callable(draft_output.to_payload_dict):
+            structured_payload = draft_output.to_payload_dict()
+        else:
+            structured_payload = draft_output.extracted_payload.model_dump(mode="json")
+
+        critique_score = draft_output.evaluation.self_critique_score
+        # Memeriksa apakah masih ada field opsional penting yang bernilai kosong/null
+        has_null_required = any(
+            v is None for k, v in structured_payload.items() 
+            if k in ["tanggal_mulai", "tanggal_selesai", "posisi_dilamar"]
+        )
+
+        surat_req.payload_data = structured_payload
+        surat_req.ai_original_draft = draft_output.ai_original_draft
+        surat_req.self_critique_score = critique_score
+        surat_req.revision_notes = list(draft_output.evaluation.revision_notes)
+
+        if critique_score < 8 or has_null_required:
+            surat_req.status = SuratStatus.REVISION_REQUIRED
+            action_code = "AI_REDRAFT_STILL_INCOMPLETE"
+        else:
+            surat_req.status = SuratStatus.PENDING_APPROVAL
+            action_code = "AI_REDRAFT_SUCCESS_PENDING_APPROVAL"
+
+        surat_req.save(
+            update_fields=[
+                "payload_data",
+                "ai_original_draft",
+                "self_critique_score",
+                "revision_notes",
+                "status",
+            ]
+        )
+
+        SuratAuditLog.objects.create(
+            surat_request=surat_req,
+            action_id="AI_02",
+            action=action_code,
+        )
+        logger.info(
+            "Re-draft surat selesai untuk SuratRequest id=%s (status=%s, skor=%s).",
+            surat_request_id,
+            surat_req.status,
+            surat_req.self_critique_score,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Kesalahan saat re-draft surat pada SuratRequest id=%s: %s",
+            surat_request_id,
+            exc,
+        )
+        _mark_surat_request_failed(
+            surat_request_id=surat_request_id,
+            error_code="AI_REDRAFT_ERR",
+            error_reason=f"{type(exc).__name__}: {exc}",
+        )
+    finally:
+        close_old_connections()
+
+
+class SuratRequestRedraftAPIView(APIView):
+    """
+    Endpoint bagi mahasiswa untuk memberikan informasi tambahan / revisi 
+    pada surat yang berstatus REVISION_REQUIRED.
+    PATCH /api/surat/requests/<int:pk>/re-draft/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [CustomJWTAuthentication]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    _last_worker_thread: Optional[threading.Thread] = None
+
+    @extend_schema(
+        summary="Perbarui Draf Surat Berdasarkan Catatan Revisi (Mahasiswa)",
+        description=(
+            "Digunakan mahasiswa untuk mengirimkan informasi tambahan guna melengkapi "
+            "draf surat yang sebelumnya berstatus REVISION_REQUIRED. "
+            "Agen AI akan memproses ulang draf dengan menggabungkan konteks lama dan koreksi baru."
+        ),
+        request=ReDraftSuratRequestSerializer,
+        responses={
+            202: SuratRequestSuccessResponseSerializer,
+            400: StandardErrorResponseSerializer,
+            404: StandardErrorResponseSerializer,
+        },
+    )
+    def patch(self, request, pk):
+        try:
+            surat_req = SuratRequest.objects.select_related("student", "kode_surat").get(pk=pk)
+        except SuratRequest.DoesNotExist:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Validasi gagal",
+                    "errors": "Permohonan surat tidak ditemukan.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Validasi kepemilikan surat (opsional, pastikan milik user yang login)
+        if hasattr(request.user, 'student_profile') and surat_req.student != request.user.student_profile:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Akses ditolak",
+                    "errors": "Anda tidak memiliki hak akses untuk mengubah permohonan surat ini.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Validasi Status: Hanya surat berstatus REVISION_REQUIRED yang boleh direvisi
+        if surat_req.status != SuratStatus.REVISION_REQUIRED:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Validasi status gagal",
+                    "errors": f"Permohonan surat tidak dalam status REVISION_REQUIRED (Status saat ini: {surat_req.status}).",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ReDraftSuratRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Validasi gagal",
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        additional_context = serializer.validated_data["additional_prompt_context"]
+
+        # Gabungkan konteks prompt lama dengan catatan koreksi tambahan
+        merged_prompt_context = (
+            f"KONTEKS AWAL:\n{surat_req.user_prompt_context}\n\n"
+            f"INFORMASI TAMBAHAN / KOREKSI PENGGUNA:\n{additional_context}"
+        )
+
+        surat_req.user_prompt_context = merged_prompt_context
+        surat_req.status = SuratStatus.SUBMITTED # Ubah sementara ke SUBMITTED selama diproses worker
+        surat_req.save(update_fields=["user_prompt_context", "status"])
+
+        SuratAuditLog.objects.create(
+            surat_request=surat_req,
+            action_id="AI_REDRAFT_SUB",
+            action="USER_PROVIDED_ADDITIONAL_INFO_FOR_REDRAFT",
+        )
+
+        student_obj = surat_req.student
+        student_metadata = {
+            "nim": student_obj.nim,
+            "nama": getattr(student_obj.user, "nama", ""),
+            "prodi": getattr(student_obj.prodi, "nama_prodi", ""),
+            "fakultas": getattr(student_obj.fakultas, "nama_fakultas", ""),
+            "semester_aktif": student_obj.semester_aktif,
+            "tahun_akademik": student_obj.tahun_akademik,
+        }
+
+        # Jalankan worker asinkron untuk re-draft
+        worker_thread = threading.Thread(
+            target=_execute_redraft_agent_worker,
+            kwargs={
+                "surat_request_id": surat_req.id,
+                "user_prompt_context": merged_prompt_context,
+                "kode_surat": surat_req.kode_surat.kode_surat,
+                "previous_draft": surat_req.ai_original_draft or "",
+                "previous_payload": surat_req.payload_data or {},
+                "previous_score": surat_req.self_critique_score or 0,
+                "revision_notes": surat_req.revision_notes or [],
+                "student_metadata": student_metadata,
+            },
+            name=f"surat-redraft-agent-{surat_req.id}",
+            daemon=True,
+        )
+        SuratRequestRedraftAPIView._last_worker_thread = worker_thread
+        worker_thread.start()
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Informasi tambahan perbaikan berhasil diterima. Draf surat sedang diproses ulang oleh agen AI.",
+                "request_id": surat_req.id,
+                "surat_status": surat_req.status,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 class SuratTypeListAPIView(ListAPIView):
     """
     Endpoint untuk melihat daftar jenis surat yang tersedia (untuk dropdown form frontend).

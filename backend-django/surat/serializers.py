@@ -138,7 +138,12 @@ class SuratRequestCreateSerializer(serializers.Serializer):
 
         return data
 
-
+class ReDraftSuratRequestSerializer(serializers.Serializer):
+    additional_prompt_context = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        help_text="Konteks tambahan atau jawaban atas revision_notes dari agen AI."
+    )
 class SuratApprovalActionSerializer(serializers.Serializer):
     """Serializer untuk input catatan opsional dan teks final saat Dosen melakukan APPROVE"""
     catatan = serializers.CharField(required=False, allow_blank=True, allow_null=True)
