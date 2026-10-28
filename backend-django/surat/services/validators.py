@@ -69,7 +69,7 @@ def validate_sr_bea(student_data, payload) :
     if not is_valid:
         raise serializers.ValidationError(msg)
 
-def validate_sr_mag(student_data):
+def validate_sr_mag(student_data, payload):
     is_valid, msg = verify_internship_semester_and_credits(student_data)
     if not is_valid:
         raise serializers.ValidationError(msg)
