@@ -150,7 +150,7 @@ def _execute_drafting_agent_worker(
 
         if critique_score < 8 or has_missing_info:
             # JANGAN LOLOSKAN KE PENDING_APPROVAL! Ubah ke status butuh revisi/gagal karena kurang info
-            surat_req.status = SuratStatus.REVISION_REQUIRED # Pastikan status ini ada di model SuratStatus, atau buat status REJECTED/FAILED
+            surat_req.status = "REVISION_REQUIRED" # Pastikan status ini ada di model SuratStatus, atau buat status REJECTED/FAILED
             surat_req.save(
                 update_fields=[
                     "payload_data",
