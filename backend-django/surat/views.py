@@ -144,6 +144,33 @@ def _execute_drafting_agent_worker(
         surat_req.ai_original_draft = draft_output.ai_original_draft
         surat_req.self_critique_score = draft_output.evaluation.self_critique_score
         surat_req.revision_notes = list(draft_output.evaluation.revision_notes)
+        
+        critique_score = draft_output.evaluation.self_critique_score
+        has_missing_info = any("tidak disebutkan" in str(v).lower() for v in structured_payload.values())
+
+        if critique_score < 8 or has_missing_info:
+            # JANGAN LOLOSKAN KE PENDING_APPROVAL! Ubah ke status butuh revisi/gagal karena kurang info
+            surat_req.status = SuratStatus.REVISION_REQUIRED # Pastikan status ini ada di model SuratStatus, atau buat status REJECTED/FAILED
+            surat_req.save(
+                update_fields=[
+                    "payload_data",
+                    "ai_original_draft",
+                    "self_critique_score",
+                    "revision_notes",
+                    "status",
+                ]
+            )
+            SuratAuditLog.objects.create(
+                surat_request=surat_req,
+                action_id="AI_REV_REQ",
+                action="AI_DRAFTING_REJECTED_INCOMPLETE_INFO",
+            )
+            logger.warning(
+                "SuratRequest id=%s dikembalikan karena informasi kurang (Skor: %s).",
+                surat_request_id,
+                critique_score,
+            )
+            return
         # STATE PAUSING: Ubah status ke PENDING_APPROVAL dan hentikan alur eksekusi.
         # DILARANG memanggil fungsi pembuatan Nomor Surat, TTE, QR Code, atau Cloudinary.
         surat_req.status = SuratStatus.PENDING_APPROVAL
