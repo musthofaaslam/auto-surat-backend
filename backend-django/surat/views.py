@@ -432,36 +432,7 @@ def _execute_redraft_agent_worker(
     finally:
         close_old_connections()
 
-def handle_incoming_surat_request(student, kode_surat, user_prompt_context):
-    agent = SuratDraftingAgent()
 
-    # 1. Jalankan Pre-check Klarifikasi Dinamis terlebih dahulu
-    clarification_result = agent.check_or_clarify_request(
-        user_prompt_context=user_prompt_context,
-        kode_surat=kode_surat,
-        student_metadata={"nim": student.nim, "nama": student.user.nama}
-    )
-
-    # 2. Jika data belum lengkap, kembalikan pertanyaan AI ke Frontend (Mode Chat/Interaktif)
-    if not clarification_result.is_complete:
-        return {
-            "status": "NEEDS_CLARIFICATION",
-            "message": clarification_result.clarification_message,
-            "missing_fields": clarification_result.missing_fields
-        }, 200
-
-    # 3. Jika sudah lengkap, lanjutkan ke proses draf resmi seperti biasa!
-    final_draft = agent.draft_letter(
-        user_prompt_context=user_prompt_context,
-        kode_surat=kode_surat,
-        student_metadata={"nim": student.nim, "nama": student.user.nama}
-    )
-
-    return {
-        "status": "DRAFTED",
-        "data": final_draft.model_dump()
-    }, 201
-    
 class SuratRequestRedraftAPIView(APIView):
     """
     Endpoint bagi mahasiswa untuk memberikan informasi tambahan / revisi 
@@ -706,6 +677,15 @@ class SuratRequestCreateAPIView(APIView):
 
         user_prompt_context = serializer.validated_data.get("user_prompt_context", "")
         initial_payload = serializer.validated_data.get("payload_data") or {}
+
+        student_metadata = {
+                    "nim": student_obj.nim,
+                    "nama": getattr(student_obj.user, "nama", ""),
+                    "prodi": getattr(student_obj.prodi, "nama_prodi", ""),
+                    "fakultas": getattr(student_obj.fakultas, "nama_fakultas", ""),
+                    "semester_aktif": student_obj.semester_aktif,
+                    "tahun_akademik": student_obj.tahun_akademik,
+                }
         
         agent = self.get_drafting_agent() or SuratDraftingAgent()
         try:
@@ -729,7 +709,6 @@ class SuratRequestCreateAPIView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
-
         # State Pausing: Buat rekam data awal dengan status SUBMITTED tanpa memicu
         # pembuatan Nomor Surat, TTE, QR Code, atau unggahan Cloudinary.
         surat_req = SuratRequest.objects.create(
@@ -746,14 +725,6 @@ class SuratRequestCreateAPIView(APIView):
             action="SURAT_SUBMITTED_FOR_AI_DRAFTING",
         )
 
-        student_metadata = {
-            "nim": student_obj.nim,
-            "nama": getattr(student_obj.user, "nama", ""),
-            "prodi": getattr(student_obj.prodi, "nama_prodi", ""),
-            "fakultas": getattr(student_obj.fakultas, "nama_fakultas", ""),
-            "semester_aktif": student_obj.semester_aktif,
-            "tahun_akademik": student_obj.tahun_akademik,
-        }
         # Ambil field dinamis yang tersimpan di kolom/atribut jenis surat (sesuaikan nama field modelnya, misal: required_fields_dict)
         dynamic_fields_dict = getattr(surat_type, "required_fields_dict", None)
 
