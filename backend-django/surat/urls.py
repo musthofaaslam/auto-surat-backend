@@ -9,7 +9,8 @@ from .views import (
     LecturerApprovalActionAPIView,
     SuratVerifyAPIView,
     SuratRequestRedraftAPIView,
-    ChatSessionMessageAPIView
+    ChatSessionMessageAPIView,
+    ChatThreadCreateAPIView
 )
 
 urlpatterns = [
@@ -20,5 +21,6 @@ urlpatterns = [
     path('approval/<int:approval_id>/action/', LecturerApprovalActionAPIView.as_view(), name='surat-approval-action'),
     path('verify/<str:token>/', SuratVerifyAPIView.as_view(), name='surat-verify'),
     path('requests/<int:pk>/re-draft/', SuratRequestRedraftAPIView.as_view(), name='surat-request-redraft'),
+    path('chat/init/', ChatThreadCreateAPIView.as_view(), name='chat-init'),
     path('chat/<str:thread_id>/', ChatSessionMessageAPIView.as_view(), name='chat-session')
 ]

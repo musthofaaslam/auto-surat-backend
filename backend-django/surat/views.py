@@ -238,110 +238,6 @@ def _execute_drafting_agent_worker(
     finally:
         close_old_connections()
 
-def _execute_approval_pipeline_worker(
-    surat_request_id: int,
-    lecturer_id: Optional[Any] = None,
-    final_approved_content: Optional[str] = None,
-    final_status: str = SuratStatus.SENT,
-    execution_tools: Optional[SuratExecutionTools] = None,
-    memory_agent: Optional[AgenticMemoryAgent] = None,
-) -> None:
-    """
-    Worker asinkron untuk menjalankan pipeline Fase 2 (Eksekusi Alat: Nomor Surat,
-    QR Code TTE, Render PDF & Unggah Cloudinary) serta Fase 3 (Agentic Memory Loop:
-    komparasi diff antara ai_original_draft dan final_approved_content) di latar belakang.
-    Memperbarui kolom file_pdf_url, qr_verification_code, TteSignature, dan mengubah
-    status akhir SuratRequest menjadi SENT atau PRINTED.
-    """
-    close_old_connections()
-    try:
-        surat_req = SuratRequest.objects.select_related(
-            "kode_surat",
-            "student",
-            "student__user",
-            "student__fakultas",
-            "student__prodi",
-        ).get(pk=surat_request_id)
-
-        signer = (
-            Lecturer.objects.select_related("user").filter(pk=lecturer_id).first()
-            if lecturer_id is not None
-            else None
-        )
-
-        active_tools = (
-            execution_tools if execution_tools is not None else SuratExecutionTools()
-        )
-        pipeline_result = active_tools.execute_approval_pipeline(
-            surat_request=surat_req,
-            signer=signer,
-            final_approved_content=final_approved_content,
-            final_status=final_status,
-        )
-
-        logger.info(
-            "Eksekusi alat pasca-approval berhasil untuk SuratRequest id=%s "
-            "(status=%s, pdf_url=%s).",
-            surat_request_id,
-            pipeline_result.final_status,
-            pipeline_result.file_pdf_url,
-        )
-
-        # Kegagalan non-kritis pada pembelajaran memori tidak boleh membatalkan surat
-        # resmi yang sudah terbit dan berstatus SENT / PRINTED.
-        try:
-            active_memory_agent = (
-                memory_agent if memory_agent is not None else AgenticMemoryAgent()
-            )
-            active_memory_agent.record_feedback_memory(
-                surat_request=surat_req,
-                ai_original_draft=surat_req.ai_original_draft,
-                final_approved_content=surat_req.final_approved_content,
-                allow_heuristic_fallback=True,
-            )
-        except MemoryAgentError as mem_exc:
-            logger.warning(
-                "Kendala operasional AgenticMemoryAgent pada SuratRequest id=%s: %s",
-                surat_request_id,
-                mem_exc,
-            )
-            SuratAuditLog.objects.create(
-                surat_request=surat_req,
-                action_id="MEM_WARN",
-                action=f"MEMORY_DIFF_SKIPPED: {mem_exc}"[:255],
-            )
-        except Exception as mem_unexpected:
-            logger.warning(
-                "Kesalahan tak terduga saat evaluasi memori pada SuratRequest id=%s: %s",
-                surat_request_id,
-                mem_unexpected,
-            )
-
-    except ExecutionToolError as exc:
-        logger.error(
-            "Kegagalan eksekusi alat pasca-approval pada SuratRequest id=%s (%s): %s",
-            surat_request_id,
-            type(exc).__name__,
-            exc,
-        )
-        _mark_surat_request_failed(
-            surat_request_id=surat_request_id,
-            error_code="EXEC_ERR_TOOL",
-            error_reason=f"{type(exc).__name__}: {exc}",
-        )
-    except Exception as exc:
-        logger.exception(
-            "Kesalahan tak terduga pada pipeline approval SuratRequest id=%s: %s",
-            surat_request_id,
-            exc,
-        )
-        _mark_surat_request_failed(
-            surat_request_id=surat_request_id,
-            error_code="EXEC_ERR_UNEXPECTED",
-            error_reason=f"{type(exc).__name__}: {exc}",
-        )
-    finally:
-        close_old_connections()
 
 def _execute_redraft_agent_worker(
     surat_request_id: int,
@@ -432,6 +328,34 @@ def _execute_redraft_agent_worker(
     finally:
         close_old_connections()
 
+class ChatThreadCreateAPIView(APIView):
+    """
+    Endpoint untuk menginisialisasi atau membuat sesi thread chat baru bagi mahasiswa.
+    POST /api/surat/chat/init/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [CustomJWTAuthentication]
+
+    def post(self, request):
+        title = request.data.get("title", "Permohonan Surat Baru")
+        document_type = request.data.get("document_type", None)
+
+        # Buat thread baru yang terikat otomatis ke user yang sedang login via JWT
+        thread = ChatThread.objects.create(
+            user=request.user,
+            title=title,
+            document_type=document_type,
+            status=ChatThread.ThreadStatus.ACTIVE
+        )
+
+        return Response({
+            "status": "success",
+            "message": "Sesi chat (thread) berhasil diinisialisasi.",
+            "thread_id": str(thread.id),
+            "title": thread.title,
+            "document_type": thread.document_type,
+            "created_at": thread.created_at
+        }, status=status.HTTP_201_CREATED)
 class ChatSessionMessageAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [CustomJWTAuthentication]
