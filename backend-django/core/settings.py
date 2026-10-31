@@ -96,7 +96,6 @@ DATABASES = {
     )
 }
 
-# settings.py
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/1")
 
 CACHES = {
@@ -105,10 +104,7 @@ CACHES = {
         "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            # Wajib ada untuk menangani protokol SSL 'rediss://' dari Upstash
-            "CONNECTION_POOL_KWARGS": {
-                "ssl_cert_reqs": None,
-            },
+            # Hapus CONNECTION_POOL_KWARGS yang error, cukup biarkan kosong atau atur timeout jika perlu
         }
     }
 }# DATABASES = {
