@@ -97,16 +97,19 @@ DATABASES = {
 }
 
 # settings.py
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/1")
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis_cache:6379/1", # 'redis' adalah nama service di docker-compose
+        "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            # Tambahkan baris ini jika menggunakan rediss:// (SSL) dari Upstash
+            "CONNECTION_POOL_CLASS": "redis.connection.ConnectionPool",
         }
     }
-}
-# DATABASES = {
+}# DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.postgresql',
 #         'NAME': os.environ.get('POSTGRES_DB') ,
