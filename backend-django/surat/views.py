@@ -348,6 +348,14 @@ class ChatThreadCreateAPIView(APIView):
             status=ChatThread.ThreadStatus.ACTIVE
         )
 
+        AutoSuratSessionManager.save_session(
+            thread_id=str(thread.id),
+            state="COLLECTING_SLOTS",  # State awal penampungan slot/intent
+            intent=document_type,       # Jika document_type dikirim dari frontend, jadikan intent awal
+            slots={},
+            missing_slots=[]
+        )
+        
         return Response({
             "status": "success",
             "message": "Sesi chat (thread) berhasil diinisialisasi.",
