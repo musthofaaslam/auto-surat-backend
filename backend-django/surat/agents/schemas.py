@@ -93,6 +93,21 @@ def create_dynamic_agent_output_schema(dynamic_payload_schema: Type[BaseModel]) 
         evaluation=(SelfEvaluationSchema, Field(..., description="Hasil evaluasi internal agen.")),
     )
 
+# class ClarificationEvaluationSchema(BaseModel):
+#     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+#     is_complete: bool = Field(
+#         ...,
+#         description="Bernilai True jika informasi pengguna sudah cukup untuk menyusun surat, False jika masih ada data yang kurang."
+#     )
+#     missing_fields: List[str] = Field(
+#         default_factory=list,
+#         description="Field utama/pertama yang masih belum disebutkan oleh pengguna."
+#     )
+#     clarification_message: str = Field(
+#         default="",
+#         description="Pertanyaan interaktif yang ramah dan spesifik untuk menanyakan 1 hal yang kurang tersebut kepada pengguna."
+#     )
 class ClarificationEvaluationSchema(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -102,9 +117,9 @@ class ClarificationEvaluationSchema(BaseModel):
     )
     missing_fields: List[str] = Field(
         default_factory=list,
-        description="Field utama/pertama yang masih belum disebutkan oleh pengguna."
+        description="Daftar SELURUH field wajib yang masih belum disebutkan oleh pengguna secara kolektif."
     )
     clarification_message: str = Field(
         default="",
-        description="Pertanyaan interaktif yang ramah dan spesifik untuk menanyakan 1 hal yang kurang tersebut kepada pengguna."
+        description="Pesan ramah yang meminta mahasiswa untuk melengkapi seluruh field yang kosong tersebut sekaligus dalam satu pesan."
     )
