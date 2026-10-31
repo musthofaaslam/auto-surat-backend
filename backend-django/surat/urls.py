@@ -20,5 +20,5 @@ urlpatterns = [
     path('approval/<int:approval_id>/action/', LecturerApprovalActionAPIView.as_view(), name='surat-approval-action'),
     path('verify/<str:token>/', SuratVerifyAPIView.as_view(), name='surat-verify'),
     path('requests/<int:pk>/re-draft/', SuratRequestRedraftAPIView.as_view(), name='surat-request-redraft'),
-    path('chat/', ChatSessionMessageAPIView.as_view(), name='chat')
+    path('chat/<int:thread_id>/', ChatSessionMessageAPIView.as_view(), name='chat-session')
 ]
