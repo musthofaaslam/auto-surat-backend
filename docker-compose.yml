@@ -16,6 +16,13 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    restart: always
+
   backend-django:
     build: ./backend-django
     container_name: django_app
@@ -25,9 +32,13 @@ services:
       - ./backend-django:/app
     env_file:
       - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     dns:
       - 8.8.8.8
       - 1.1.1.1

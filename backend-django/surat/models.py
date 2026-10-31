@@ -179,3 +179,43 @@ class AgentFeedbackMemory(models.Model):
         indexes = [
             models.Index(fields=['kode_surat', 'is_active']),
         ]
+        
+import uuid
+from django.db import models
+
+class ChatThread(models.Model):
+    """Menyimpan metadata sesi/thread obrolan mahasiswa."""
+    class ThreadStatus(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        COMPLETED = 'completed', 'Completed'
+        CANCELLED = 'cancelled', 'Cancelled'
+        EXPIRED = 'expired', 'Expired'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='chat_threads'
+    )
+    title = models.CharField(max_length=255, default="Permohonan Surat Baru")
+    document_type = models.CharField(max_length=50, null=True, blank=True) # e.g. surat_keterangan_aktif
+    status = models.CharField(
+        max_length=20, 
+        choices=ThreadStatus.choices, 
+        default=ThreadStatus.ACTIVE
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'status']),
+        ]
+
+class ChatMessage(models.Model):
+    """Menyimpan riwayat pesan di setiap thread untuk keperluan history & LLM context."""
+    thread = models.ForeignKey(ChatThread, on_delete=models.CASCADE, related_name='messages')
+    sender = models.CharField(max_length=20) # 'user' atau 'assistant'
+    message = models.TextField()
+    slots_snapshot = models.JSONField(null=True, blank=True) # Snapshot slot saat pesan dikirim
+    created_at = models.DateTimeField(auto_now_add=True)

@@ -27,6 +27,7 @@ from surat.agents.schemas import (
     build_dynamic_payload_schema,
     create_dynamic_agent_output_schema,
 )
+from surat.models import SuratType
 
 # SARAN PERBAIKAN ARSITEKTURAL:
 # 1. Hierarki exception khusus (`SuratAgentError` beserta sub-kelas spesifik untuk Timeout,
@@ -719,42 +720,70 @@ class SuratDraftingAgent:
         )
         return revised_draft
 
+    def get_all_available_templates():
+        """
+        Mengambil seluruh master data jenis surat dan field wajibnya 
+        langsung dari database untuk diberikan sebagai referensi Intent Classification ke AI.
+        """
+        templates = []
+        for st in SuratType.objects.all():
+            templates.append({
+                "kode": st.kode_surat,
+                "nama": st.nama_surat,
+                "kategori": st.kategori,
+                "required_fields": st.required_payload_fields # Mengambil langsung dari JSONField database
+            })
+        return templates
+    
     def check_or_clarify_request(
         self,
         user_prompt_context: str,
-        kode_surat: str,
+        kode_surat: Optional[str] = None,
         student_metadata: Optional[Dict[str, Any]] = None,
+        detected_intent: Optional[str] = None
     ) -> ClarificationEvaluationSchema:
         """
-        Melakukan pra-pemeriksaan cerdas (Pre-check) secara bertahap menggunakan LLM.
+        Melakukan Pre-check cerdas:
+        1. Jika `kode_surat` kosong (pesan pertama), AI mendeteksi jenis surat (Intent Classification) 
+        dan langsung mengekstrak slot awal.
+        2. Jika `kode_surat` sudah ada, AI fokus melakukan Slot Filling lanjutan.
         """
-        required_fields = self.get_required_fields_for_kode(kode_surat)
+        # 1. Ambil daftar seluruh template surat sebagai referensi LLM jika kode_surat belum ditentukan
+        available_templates = self.get_all_available_templates() # e.g., [{"kode": "SURAT_MAGANG", "nama": "Surat Pengantar Magang", ...}]
         
-        fields_desc = "\n".join(
-            f"- `{item.get('field')}` (Label: {item.get('label')}): {item.get('description')}"
-            for item in required_fields
-        )
+        if kode_surat:
+            required_fields = self.get_required_fields_for_kode(kode_surat)
+            fields_desc = "\n".join(
+                f"- `{item.get('field')}` (Label: {item.get('label')}): {item.get('description')}"
+                for item in required_fields
+            )
+            context_intent_instruction = f"KODE SURAT AKTIF: {kode_surat}\nFIELD WAJIB:\n{fields_desc}"
+        else:
+            # Jika belum ada kode_surat, berikan panduan seluruh jenis surat ke LLM
+            templates_desc = "\n".join(
+                f"- `{t.get('kode')}`: {t.get('nama')} (Field Wajib: {', '.join([f['field'] for f in t.get('required_fields', [])])})"
+                for t in available_templates
+            )
+            context_intent_instruction = f"JENIS SURAT TERSEDIA DI KAMPUS:\n{templates_desc}\n\nLakukan deteksi `detected_intent` dari kalimat mahasiswa."
 
         system_instruction = (
             "ATURAN NOL (VALIDASI UTAMA):\n"
             "Jika `user_prompt_context` sangat pendek, tidak jelas, hanya berisi spasi, atau tidak memuat informasi substansial sama sekali, "
-            "maka WAJIB set `is_complete = false`, masukkan SEMUA field wajib ke dalam `missing_fields`, dan tanyakan data pertamanya.\n\n"
-            "Anda adalah Asisten Layanan Akademik Kampus yang sangat teliti dan ketat.\n"
-            "Tugas Anda: Periksa dengan seksama apakah `user_prompt_context` dari mahasiswa sudah memuat informasi "
-            "untuk SELURUH field wajib berikut secara eksplisit:\n\n"
-            f"{fields_desc}\n\n"
+            "maka WAJIB set `is_complete = false`, masukkan field yang dibutuhkan ke `missing_fields`, dan tanyakan maksud mahasiswa.\n\n"
+            "Anda adalah Asisten Layanan Akademik Kampus yang sangat teliti dan cerdas.\n"
+            "Tugas Anda:\n"
+            "1. Tentukan `detected_intent` (kode surat) berdasarkan kalimat mahasiswa jika belum ada.\n"
+            "2. Periksa apakah informasi yang dibutuhkan untuk jenis surat tersebut sudah dipenuhi dalam `user_prompt_context`.\n"
+            "3. Ekstrak data yang sudah ada ke dalam `extracted_slots`.\n\n"
+            f"{context_intent_instruction}\n\n"
             "ATURAN MUTLAK PENILAIAN:\n"
-            "1. Jika ada SATU SAJA field wajib di atas yang belum disebutkan atau masih kosong dalam konteks mahasiswa, "
-            "maka kamu WAJIB menetapkan `is_complete` bernilai `false`.\n"
-            "2. Masukkan SEMUA nama field (`field`) yang belum ada tersebut ke dalam array `missing_fields`.\n"
-            "3. Hanya jika SEMUA field wajib sudah terisi dengan lengkap dan jelas, tetapkan `is_complete = true` dan `missing_fields = []`.\n"
+            "1. Jika ada SATU SAJA field wajib yang belum disebutkan atau masih kosong, set `is_complete = false`.\n"
+            "2. Masukkan nama field yang belum ada tersebut ke dalam array `missing_fields`.\n"
+            "3. Hanya jika SEMUA field wajib sudah terisi lengkap dan jelas, tetapkan `is_complete = true` dan `missing_fields = []`.\n"
             "4. Pada `clarification_message`, buatlah pertanyaan bahasa Indonesia yang ramah, tetapi HANYA tanyakan 1 (satu) field paling krusial yang berada di urutan teratas `missing_fields`."
         )
 
-        user_prompt = (
-            f"KODE SURAT: {kode_surat}\n"
-            f"KONTEKS MAHASISWA:\n\"\"\"\n{user_prompt_context}\n\"\"\""
-        )
+        user_prompt = f"KONTEKS MAHASISWA:\n\"\"\"\n{user_prompt_context}\n\"\"\""
 
         client = self._get_or_create_client()
         json_schema = self._build_gemini_compatible_json_schema(ClarificationEvaluationSchema)

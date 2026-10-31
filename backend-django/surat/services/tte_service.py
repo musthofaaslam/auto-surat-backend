@@ -24,7 +24,7 @@ def create_tte_signature(surat_request, signer=None):
         token=token
     )
 
-    qr_code_url = f"https://api.kampus.ac.id/api/surat/verify/{token}/"
+    qr_code_url = f"https://auto-surat-backend.onrender.com/surat/verify/{token}/"
 
     return {
         "instance": tte_instance,

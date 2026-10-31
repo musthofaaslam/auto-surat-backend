@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Dokumen Resmi Surat Kampus</title>
+    <style>
+        /* Pengaturan Halaman PDF untuk WeasyPrint */
+        @page {
+            size: A4;
+            margin: 2.5cm 2cm 2.5cm 2cm;
+        }
+        body {
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            color: #000000;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Kop Surat */
+        .kop-surat {
+            text-align: center;
+            border-bottom: 3px double #000000;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .kop-surat h2, .kop-surat h3, .kop-surat h4 {
+            margin: 2px 0;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .kop-surat p {
+            margin: 2px 0;
+            font-size: 10pt;
+        }
+
+        /* Meta / Perihal Surat */
+        .meta-surat {
+            margin-bottom: 20px;
+        }
+        .meta-surat table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .meta-surat td {
+            vertical-align: top;
+            padding: 2px 0;
+        }
+
+        /* Badan / Isi Surat */
+        .isi-surat {
+            text-align: justify;
+            margin-bottom: 40px;
+            text-justify: inter-word;
+        }
+        .isi-surat p {
+            margin-bottom: 12px;
+            text-indent: 45px; /* Standar paragraf menjorok */
+        }
+
+        /* Bagian Tanda Tangan & TTE */
+        .ttd-container {
+            width: 100%;
+            margin-top: 30px;
+            page-break-inside: avoid;
+        }
+        
+        /* 1. Single Approval (1 TTD di kanan) */
+        .ttd-single {
+            float: right;
+            width: 45%;
+            text-align: left;
+        }
+
+        /* 2. Dual Approval (2 Kolom TTD: Kiri & Kanan) */
+        .ttd-dual {
+            width: 100%;
+        }
+        .ttd-column-left {
+            float: left;
+            width: 45%;
+            text-align: left;
+        }
+        .ttd-column-right {
+            float: right;
+            width: 45%;
+            text-align: left;
+        }
+
+        /* Utility Clearfix */
+        .clear {
+            clear: both;
+        }
+
+        /* QR Code Styling */
+        .qr-code {
+            width: 75px;
+            height: 75px;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- KOP SURAT -->
+    <div class="kop-surat">
+        <h3>KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI</h3>
+        <h2>UNIVERSITAS KAMPUS KITA</h2>
+        <h4>FAKULTAS {{ student.fakultas.nama_fakultas|upper }}</h4>
+        <p>Jl. Kampus Utama No. 1, Babarsari, Yogyakarta 55281</p>
+        <p>Laman: www.kampus.ac.id | Email: info@kampus.ac.id</p>
+    </div>
+
+    <!-- NOMOR DAN PERIHAL -->
+    <div class="meta-surat">
+        <table>
+            <tr>
+                <td style="width: 80px;">Nomor</td>
+                <td style="width: 15px;">:</td>
+                <td>{{ nomor_surat }}</td>
+            </tr>
+            <tr>
+                <td>Lampiran</td>
+                <td>:</td>
+                <td>-</td>
+            </tr>
+            <tr>
+                <td>Perihal</td>
+                <td>:</td>
+                <td><b>Permohonan Surat Keterangan / Izin</b></td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- ISI UTAMA SURAT (HASIL GENERATE AI / FINAL CONTENT) -->
+    <div class="isi-surat">
+        {{ final_content|safe }}
+    </div>
+
+    <!-- BLOK TANDA TANGAN & TTE (DINAMIS BERDASARKAN ATURAN APPROVAL) -->
+    <div class="ttd-container">
+        {% if approvals and approvals|length > 1 %}
+            <!-- DUAL APPROVAL (2 TTD: Kiri DPA/Kaprodi, Kanan Dekan/Pejabat Akhir) -->
+            <div class="ttd-dual">
+                <div class="ttd-column-left">
+                    <p>Mengetahui,<br>{{ approvals.0.approver_role|default:"Dosen Pembimbing" }}</p>
+                    <div style="height: 60px;"></div> <!-- Ruang TTD Manual / Paraf -->
+                    <p><u><b>{{ approvals.0.approver_name|default:"..................................." }}</b></u><br>NIP. {{ approvals.0.approver_nip|default:"-" }}</p>
+                </div>
+                
+                <div class="ttd-column-right">
+                    <p>Yogyakarta, {{ tanggal_terbit|date:"d F Y" }}<br>{{ approvals.1.approver_role|default:"Pimpinan Fakultas" }}</p>
+                    
+                    <!-- QR Code TTE Digital untuk Level Akhir -->
+                    {% if qr_code_url %}
+                    <div>
+                        <img src="{{ qr_code_url }}" alt="QR Code TTE" class="qr-code" />
+                    </div>
+                    {% endif %}
+                    
+                    <p><u><b>{{ approvals.1.approver_name|default:"..................................." }}</b></u><br>NIP. {{ approvals.1.approver_nip|default:"-" }}</p>
+                </div>
+                <div class="clear"></div>
+            </div>
+        {% else %}
+            <!-- SINGLE APPROVAL (1 TTD di Kanan dengan QR Code TTE) -->
+            <div class="ttd-single">
+                <p>Yogyakarta, {{ tanggal_terbit|date:"d F Y" }}<br>a.n. Dekan,<br>Wakil Dekan Bidang Akademik,</p>
+                
+                {% if qr_code_url %}
+                <div>
+                    <img src="{{ qr_code_url }}" alt="QR Code TTE" class="qr-code" />
+                </div>
+                {% endif %}
+                
+                <p><u><b>{{ signer_name|default:"Dr. Pejabat Kampus, M.Sc." }}</b></u><br>NIP. {{ signer_nip|default:"198001012005011001" }}</p>
+            </div>
+            <div class="clear"></div>
+        {% endif %}
+    </div>
+
+</body>
+</html>

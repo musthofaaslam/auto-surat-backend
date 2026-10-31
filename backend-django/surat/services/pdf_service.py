@@ -11,7 +11,7 @@ def render_and_upload_pdf(template_path, context_data):
     3. Upload file PDF ke Cloudinary dan kembalikan URL amannya (secure_url).
     """
     if not template_path:
-        template_path = "surat/default_template.html"
+        template_path = "surat/base_surat.html"
 
     # Render string HTML menggunakan template engine Django
     html_string = render_to_string(template_path, context_data)

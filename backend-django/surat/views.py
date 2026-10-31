@@ -37,6 +37,8 @@ from .models import (
     SuratStatus,
     SuratType,
     TteSignature,
+    ChatThread,
+    ChatMessage,
 )
 from .serializers import (
     ApprovalActionErrorResponseSerializer,
@@ -55,6 +57,7 @@ from .serializers import (
     ReDraftSuratRequestSerializer,
 )
 from .services.workflow_service import process_approval_action
+from .services.session import AutoSuratSessionManager
 
 # SARAN PERBAIKAN ARSITEKTURAL:
 # 1. Eksekusi `SuratDraftingAgent.draft_letter()` didelegasikan ke background worker thread
@@ -112,7 +115,6 @@ def _mark_surat_request_failed(
             db_exc,
         )
 
-
 def _execute_drafting_agent_worker(
     surat_request_id: int,
     user_prompt_context: str,
@@ -148,13 +150,11 @@ def _execute_drafting_agent_worker(
         surat_req.revision_notes = list(draft_output.evaluation.revision_notes)
         
         critique_score = draft_output.evaluation.self_critique_score
-        has_missing_info = any(
-            v is None or str(v).strip() in ["", "-", "tidak disebutkan", "null", "undefined"]
-            for v in structured_payload.values()
-        )
-        if critique_score < 8 or has_missing_info:
-            # JANGAN LOLOSKAN KE PENDING_APPROVAL! Ubah ke status butuh revisi/gagal karena kurang info
-            surat_req.status = "REVISION_REQUIRED" # Pastikan status ini ada di model SuratStatus, atau buat status REJECTED/FAILED
+        
+        # Pengecekan has_missing_info dihapus karena slot data sudah divalidasi tuntas di sesi chat.
+        # Kita hanya menjaga ambang batas kualitas redaksi AI (misal skor di bawah 7 memerlukan tinjauan ulang).
+        if critique_score < 7:
+            surat_req.status = SuratStatus.REVISION_REQUIRED
             surat_req.save(
                 update_fields=[
                     "payload_data",
@@ -167,14 +167,15 @@ def _execute_drafting_agent_worker(
             SuratAuditLog.objects.create(
                 surat_request=surat_req,
                 action_id="AI_REV_REQ",
-                action="AI_DRAFTING_REJECTED_INCOMPLETE_INFO",
+                action="AI_DRAFTING_LOW_QUALITY_SCORE",
             )
             logger.warning(
-                "SuratRequest id=%s dikembalikan karena informasi kurang (Skor: %s).",
+                "SuratRequest id=%s dikembalikan karena skor evaluasi diri AI terlalu rendah (Skor: %s).",
                 surat_request_id,
                 critique_score,
             )
             return
+
         # STATE PAUSING: Ubah status ke PENDING_APPROVAL dan hentikan alur eksekusi.
         # DILARANG memanggil fungsi pembuatan Nomor Surat, TTE, QR Code, atau Cloudinary.
         surat_req.status = SuratStatus.PENDING_APPROVAL
@@ -236,7 +237,6 @@ def _execute_drafting_agent_worker(
         )
     finally:
         close_old_connections()
-
 
 def _execute_approval_pipeline_worker(
     surat_request_id: int,
@@ -432,7 +432,116 @@ def _execute_redraft_agent_worker(
     finally:
         close_old_connections()
 
+class ChatSessionMessageAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [CustomJWTAuthentication]
 
+    def post(self, request, thread_id):
+        user_msg = request.data.get("message", "").strip()
+        if not user_msg:
+            return Response(
+                {"status": "error", "message": "Pesan tidak boleh kosong."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 1. Pastikan thread milik user yang sedang login
+        thread = ChatThread.objects.filter(id=thread_id, user=request.user).first()
+        if not thread:
+            return Response(
+                {"status": "error", "message": "Sesi chat atau thread tidak ditemukan."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 2. Jalankan SessionManager (Menangani Guardrail "batal", TTL 30 menit, & State Redis)
+        session_result = AutoSuratSessionManager.handle_incoming_message(
+            thread_id=str(thread.id),
+            user_message=user_msg,
+            user_obj=request.user
+        )
+
+        if session_result["state"] in ["CANCELLED", "EXPIRED"]:
+            return Response({
+                "status": "success",
+                "state": session_result["state"],
+                "reply": session_result["reply"]
+            }, status=status.HTTP_200_OK)
+
+        current_state = session_result["state"]
+        intent = session_result["intent"] # Kode surat yang tersimpan di Redis (misal: "SR-MAG")
+        slots = session_result["slots"]
+
+        # 3. CEK KONFIRMASI: Jika sesi sedang menunggu konfirmasi (preview sudah tampil) 
+        if current_state == "AWAITING_CONFIRMATION" and user_msg.lower() in ["lanjut", "ya", "proses", "oke", "buatkan", "ok", "yes"]:
+            return Response({
+                "status": "trigger_create_request",
+                "state": "AWAITING_CONFIRMATION",
+                "reply": "Konfirmasi diterima! Memproses pembuatan draf surat resmi Anda...",
+                "kode_surat": intent,
+                "collected_slots": slots
+            }, status=status.HTTP_200_OK)
+
+        agent = SuratDraftingAgent()
+
+        # Ambil metadata mahasiswa
+        student_obj = getattr(request.user, 'student_profile', None)
+        student_metadata = {
+            "nim": getattr(student_obj, "nim", ""),
+            "nama": getattr(request.user, "nama", ""),
+            "prodi": getattr(getattr(student_obj, "prodi", None), "nama_prodi", ""),
+        } if student_obj else {}
+
+        # 4. Jalankan AI Agent (Mendukung Intent Classification jika `intent` masih kosong)
+        try:
+            clarification_result = agent.check_or_clarify_request(
+                user_prompt_context=user_msg,
+                kode_surat=intent, # Akan bernilai None jika pesan pertama, sehingga AI otomatis mendeteksi
+                student_metadata=student_metadata
+            )
+        except Exception as exc:
+            logger.exception("Gagal melakukan clarification check pada chat session:")
+            return Response(
+                {"status": "error", "message": "Terjadi kendala pada pemrosesan AI."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Jika intent belum ada di Redis, simpan `detected_intent` hasil tebakan AI ke Redis
+        if not intent and getattr(clarification_result, "detected_intent", None):
+            intent = clarification_result.detected_intent
+
+        # 5. Jika Data Belum Lengkap -> Minta Klarifikasi / Slot Filling Lanjutan
+        if not clarification_result.is_complete:
+            AutoSuratSessionManager.save_session(
+                str(thread.id), 
+                state="COLLECTING_SLOTS", 
+                intent=intent, # Simpan intent yang baru terdeteksi
+                missing_slots=clarification_result.missing_fields
+            )
+            return Response({
+                "status": "needs_clarification",
+                "state": "COLLECTING_SLOTS",
+                "detected_intent": intent,
+                "reply": clarification_result.clarification_message,
+                "missing_fields": clarification_result.missing_fields
+            }, status=status.HTTP_200_OK)
+
+        # 6. Jika Data SUDAH LENGKAP -> Transisi ke State Konfirmasi (Preview)
+        AutoSuratSessionManager.save_session(
+            str(thread.id), 
+            state="AWAITING_CONFIRMATION", 
+            intent=intent,
+            slots=clarification_result.extracted_slots
+        )
+        
+        preview_summary = "\n".join([f"- **{k}**: {v}" for k, v in clarification_result.extracted_slots.items()])
+
+        return Response({
+            "status": "ready_to_preview",
+            "state": "AWAITING_CONFIRMATION",
+            "detected_intent": intent,
+            "reply": f"Beres! Semua data yang diperlukan sudah terkumpul. Berikut ringkasan datanya:\n\n{preview_summary}\n\nApakah data di atas sudah benar? Silakan ketik **'Lanjut'** untuk memproses draf resmi.",
+            "collected_slots": clarification_result.extracted_slots
+        }, status=status.HTTP_200_OK)
+        
 class SuratRequestRedraftAPIView(APIView):
     """
     Endpoint bagi mahasiswa untuk memberikan informasi tambahan / revisi 
@@ -458,42 +567,23 @@ class SuratRequestRedraftAPIView(APIView):
             404: StandardErrorResponseSerializer,
         },
     )
-    def patch(self, request, pk):
+    def post(self, request):
         try:
-            surat_req = SuratRequest.objects.select_related("student", "kode_surat").get(pk=pk)
-        except SuratRequest.DoesNotExist:
+            student_obj = request.user.student_profile
+        except (Student.DoesNotExist, AttributeError):
             return Response(
                 {
                     "status": "error",
                     "message": "Validasi gagal",
-                    "errors": "Permohonan surat tidak ditemukan.",
-                },
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # Validasi kepemilikan surat (opsional, pastikan milik user yang login)
-        if hasattr(request.user, 'student_profile') and surat_req.student != request.user.student_profile:
-            return Response(
-                {
-                    "status": "error",
-                    "message": "Akses ditolak",
-                    "errors": "Anda tidak memiliki hak akses untuk mengubah permohonan surat ini.",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Validasi Status: Hanya surat berstatus REVISION_REQUIRED yang boleh direvisi
-        if surat_req.status != "REVISION_REQUIRED":
-            return Response(
-                {
-                    "status": "error",
-                    "message": "Validasi status gagal",
-                    "errors": f"Permohonan surat tidak dalam status REVISION_REQUIRED (Status saat ini: {surat_req.status}).",
+                    "errors": "Bukan akun mahasiswa. Hanya mahasiswa yang dapat mengajukan surat.",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = ReDraftSuratRequestSerializer(data=request.data)
+        serializer = SuratRequestCreateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         if not serializer.is_valid():
             return Response(
                 {
@@ -504,36 +594,55 @@ class SuratRequestRedraftAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        additional_context = serializer.validated_data["additional_prompt_context"]
+        kode_surat_str = serializer.validated_data["kode_surat"]
+        try:
+            surat_type = SuratType.objects.get(kode_surat=kode_surat_str)
+        except SuratType.DoesNotExist:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Validasi gagal",
+                    "errors": "Jenis surat tidak ditemukan.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        # Gabungkan konteks prompt lama dengan catatan koreksi tambahan
-        payload = surat_req.payload_data or {}
-        revision_history = payload.get("revision_history", [])
-        revision_history.append({
-            "attempt": len(revision_history) + 1,
-            "feedback": additional_context
-        })
-        payload["revision_history"] = revision_history
+        # =========================================================================
+        # PENCEGAHAN DOUBLE REQUEST:
+        # Cek apakah mahasiswa ini masih memiliki permohonan aktif untuk kode_surat yang sama.
+        # Status aktif meliputi: Sedang diproses AI, Menunggu Dosen, atau Perlu Revisi.
+        # =========================================================================
+        active_statuses = [
+            SuratStatus.SUBMITTED,
+            SuratStatus.PENDING_APPROVAL,
+            SuratStatus.REVISION_REQUIRED,
+        ]
+        existing_active_request = SuratRequest.objects.filter(
+            student=student_obj,
+            kode_surat=surat_type,
+            status__in=active_statuses
+        ).first()
 
-        # Gabungkan secara linear atau terus terang berikan feedback terbaru ke agen
-        # (Opsional: Jika ingin mempertahankan prompt awal asli tanpa nesting berlebih)
-        merged_prompt_context = (
-            f"{surat_req.user_prompt_context}\n"
-            f"[Koreksi Tambahan #len(revision_history)]: {additional_context}"
-        )
+        if existing_active_request:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Pengajuan Ganda Ditolak",
+                    "errors": (
+                        f"Anda masih memiliki permohonan aktif untuk jenis surat '{surat_type.nama_surat}' "
+                        f"dengan status '{existing_active_request.status}'. "
+                        "Silakan selesaikan atau periksa permohonan yang sudah ada."
+                    ),
+                    "existing_request_id": existing_active_request.id,
+                    "surat_status": existing_active_request.status,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # =========================================================================
 
-        surat_req.user_prompt_context = merged_prompt_context
-        surat_req.payload_data = payload
-        surat_req.status = SuratStatus.SUBMITTED # Ubah sementara ke SUBMITTED selama diproses worker
-        surat_req.save(update_fields=["user_prompt_context","payload_data", "status"])
+        user_prompt_context = serializer.validated_data.get("user_prompt_context", "")
+        initial_payload = serializer.validated_data.get("payload_data") or {}
 
-        SuratAuditLog.objects.create(
-            surat_request=surat_req,
-            action_id="AI_REDRAFT_SUB",
-            action="USER_PROVIDED_ADDITIONAL_INFO_FOR_REDRAFT",
-        )
-
-        student_obj = surat_req.student
         student_metadata = {
             "nim": student_obj.nim,
             "nama": getattr(student_obj.user, "nama", ""),
@@ -543,34 +652,57 @@ class SuratRequestRedraftAPIView(APIView):
             "tahun_akademik": student_obj.tahun_akademik,
         }
 
-        # Jalankan worker asinkron untuk re-draft
+        # Buat rekam data awal dengan status SUBMITTED
+        surat_req = SuratRequest.objects.create(
+            student=student_obj,
+            kode_surat=surat_type,
+            status=SuratStatus.SUBMITTED,
+            payload_data=initial_payload,
+            user_prompt_context=user_prompt_context,
+        )
+
+        SuratAuditLog.objects.create(
+            surat_request=surat_req,
+            action_id="AI_01",
+            action="SURAT_SUBMITTED_FOR_AI_DRAFTING",
+        )
+
+        dynamic_fields_dict = getattr(surat_type, "required_fields_dict", None)
+
         worker_thread = threading.Thread(
-            target=_execute_redraft_agent_worker,
+            target=_execute_drafting_agent_worker,
             kwargs={
                 "surat_request_id": surat_req.id,
-                "user_prompt_context": merged_prompt_context,
-                "kode_surat": surat_req.kode_surat.kode_surat,
-                "previous_draft": surat_req.ai_original_draft or "",
-                "previous_payload": surat_req.payload_data or {},
-                "previous_score": surat_req.self_critique_score or 0,
-                "revision_notes": surat_req.revision_notes or [],
+                "user_prompt_context": user_prompt_context,
+                "kode_surat": surat_type.kode_surat,
                 "student_metadata": student_metadata,
+                "agent": self.get_drafting_agent(),
+                "dynamic_fields_dict": dynamic_fields_dict,
             },
-            name=f"surat-redraft-agent-{surat_req.id}",
+            name=f"surat-drafting-agent-{surat_req.id}",
             daemon=True,
         )
-        SuratRequestRedraftAPIView._last_worker_thread = worker_thread
+        SuratRequestCreateAPIView._last_worker_thread = worker_thread
         worker_thread.start()
 
         return Response(
             {
                 "status": "success",
-                "message": "Informasi tambahan perbaikan berhasil diterima. Draf surat sedang diproses ulang oleh agen AI.",
+                "message": (
+                    f"Permohonan surat {surat_type.nama_surat} berhasil diterima dan sedang "
+                    "diproses secara asinkron oleh agen AI."
+                ),
                 "request_id": surat_req.id,
                 "surat_status": surat_req.status,
+                "data": {
+                    "request_id": surat_req.id,
+                    "kode_surat": surat_type.kode_surat,
+                    "status": surat_req.status,
+          },
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
 class SuratTypeListAPIView(ListAPIView):
     """
     Endpoint untuk melihat daftar jenis surat yang tersedia (untuk dropdown form frontend).
@@ -688,28 +820,6 @@ class SuratRequestCreateAPIView(APIView):
                 }
         
         agent = self.get_drafting_agent() or SuratDraftingAgent()
-        try:
-            clarification_result = agent.check_or_clarify_request(
-                user_prompt_context=user_prompt_context,
-                kode_surat=surat_type.kode_surat,
-                student_metadata=student_metadata,
-            )
-        except Exception as exc:
-            # logger.warning("Gagal menjalankan pre-check klarifikasi, melanjutkan ke drafting: %s", exc)
-            logger.exception("TERJADI ERROR DETAIL PADA PRE-CHECK KLARIFIKASI:")
-            clarification_result = None
-
-        # Jika AI menilai data belum lengkap (misal kurang tanggal atau instansi),
-        # hentikan proses dan kembalikan pertanyaan interaktif ke Frontend (Chat UI).
-        if clarification_result and not clarification_result.is_complete:
-            return Response(
-                {
-                    "status": "needs_clarification",
-                    "message": clarification_result.clarification_message, # Pertanyaan ramah 1 poin utama
-                    "missing_fields": clarification_result.missing_fields,
-                },
-                status=status.HTTP_200_OK,
-            )
         # State Pausing: Buat rekam data awal dengan status SUBMITTED tanpa memicu
         # pembuatan Nomor Surat, TTE, QR Code, atau unggahan Cloudinary.
         surat_req = SuratRequest.objects.create(
@@ -792,49 +902,21 @@ class SuratRequestDetailAPIView(RetrieveAPIView):
 class LecturerApprovalActionAPIView(APIView):
     """
     Endpoint bagi Dosen/Pejabat untuk menyetujui (APPROVE) atau menolak (REJECT) antrean surat.
-    Saat keputusan APPROVE final diterima, sistem menyimpan naskah final (`final_approved_content`)
-    dan mendelegasikan pembuatan TTE, QR Code, PDF Cloudinary (`execution_tools`), serta
-    pembelajaran gaya bahasa (`memory_agent`) ke dalam background thread asinkron.
+    Mendelegasikan seluruh eksekusi bisnis persetujuan, nomor, TTE, dan PDF ke `process_approval_action`.
+    
     POST /api/surat/approval/<int:approval_id>/action/
     """
     permission_classes = [permissions.IsAuthenticated]
-    authentication_classes = [CustomJWTAuthentication]
-    execution_tools_instance: Optional[SuratExecutionTools] = None
-    memory_agent_instance: Optional[AgenticMemoryAgent] = None
-    _last_worker_thread: Optional[threading.Thread] = None
 
-    def get_execution_tools(self) -> Optional[SuratExecutionTools]:
-        """
-        Mengembalikan instance SuratExecutionTools kustom apabila disuntikkan (misal pada pengujian),
-        atau None agar worker menginisialisasi instance baru di dalam background thread.
-        """
-        return self.execution_tools_instance
-
-    def get_memory_agent(self) -> Optional[AgenticMemoryAgent]:
-        """
-        Mengembalikan instance AgenticMemoryAgent kustom apabila disuntikkan (misal pada pengujian),
-        atau None agar worker menginisialisasi instance baru di dalam background thread.
-        """
-        return self.memory_agent_instance
-
-    # SARAN PERBAIKAN ARSITEKTURAL:
-    # 1. Dekorator `@extend_schema` mendefinisikan kontrak input dan output secara eksplisit
-    #    bagi `drf-spectacular` termasuk atribut baru `final_approved_content` dan `final_status`.
-    # 2. Pada cabang `APPROVE` tahap akhir, operasi berat (WeasyPrint PDF, unggah Cloudinary,
-    #    dan inferensi diff LLM `gemini-3.8-flash`) dieksekusi di dalam background thread
-    #    `_execute_approval_pipeline_worker` agar endpoint merespons seketika tanpa timeout.
     @extend_schema(
         summary="Tindakan Persetujuan atau Penolakan Surat (Dosen/Pejabat)",
         description=(
             "Digunakan oleh Dosen atau Pejabat berwenang untuk menyetujui (APPROVE) "
-            "atau menolak (REJECT) antrean pengajuan surat berdasarkan approval_id. "
-            "Saat APPROVE final dilakukan, teks final disimpan dan eksekusi PDF/TTE/Cloudinary "
-            "serta Agentic Memory Loop dijalankan secara asinkron di latar belakang."
+            "atau menolak (REJECT) antrean pengajuan surat secara manual."
         ),
         request=LecturerApprovalActionRequestSerializer,
         responses={
             200: LecturerApprovalActionResponseSerializer,
-            202: LecturerApprovalActionResponseSerializer,
             400: ApprovalActionErrorResponseSerializer,
             403: ApprovalActionErrorResponseSerializer,
             404: ApprovalActionErrorResponseSerializer,
@@ -857,185 +939,35 @@ class LecturerApprovalActionAPIView(APIView):
             )
 
         catatan = ""
-        submitted_final_content: Optional[str] = None
-        requested_final_status: str = SuratStatus.SENT
-
         if action == "APPROVE":
             serializer = SuratApprovalActionSerializer(data=request.data)
             if not serializer.is_valid():
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             catatan = serializer.validated_data.get("catatan") or ""
-            submitted_final_content = serializer.validated_data.get("final_approved_content")
-            requested_final_status = (
-                serializer.validated_data.get("final_status") or SuratStatus.SENT
-            )
         elif action == "REJECT":
             serializer = SuratRejectActionSerializer(data=request.data)
             if not serializer.is_valid():
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             catatan = serializer.validated_data["alasan_penolakan"]
 
-        # Fallback defensif apabila approval_id merujuk langsung pada SuratRequest
-        # berstatus PENDING_APPROVAL yang belum memiliki baris SuratApproval
+        # Validasi kepemilikan approval step sebelum dilempar ke service
         try:
-            approval_step = SuratApproval.objects.select_related(
-                "surat_request",
-                "surat_request__kode_surat",
-                "surat_request__student",
-                "surat_request__student__user",
-                "surat_request__student__fakultas",
-                "surat_request__student__prodi",
-            ).get(id=approval_id)
+            approval_step = SuratApproval.objects.select_related('approver').get(id=approval_id)
         except SuratApproval.DoesNotExist:
-            surat_req_candidate = (
-                SuratRequest.objects.select_related(
-                    "kode_surat",
-                    "student",
-                    "student__user",
-                    "student__fakultas",
-                    "student__prodi",
-                )
-                .filter(id=approval_id, status=SuratStatus.PENDING_APPROVAL)
-                .first()
-            )
-            if (
-                surat_req_candidate is not None
-                and not SuratApproval.objects.filter(surat_request=surat_req_candidate).exists()
-            ):
-                approval_step = SuratApproval.objects.create(
-                    surat_request=surat_req_candidate,
-                    step_order=1,
-                    approver=lecturer_obj,
-                    status=ApprovalStatus.PENDING,
-                )
-            else:
-                return Response(
-                    {"error": "Antrean approval tidak ditemukan."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+            return Response({"error": "Antrean approval tidak ditemukan."}, status=status.HTTP_404_NOT_FOUND)
 
         if approval_step.approver != lecturer_obj:
-            return Response(
-                {"error": "Anda tidak memiliki hak akses untuk menyetujui antrean ini."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"error": "Anda tidak memiliki hak akses untuk menyetujui antrean ini."}, status=status.HTTP_403_FORBIDDEN)
 
-        if approval_step.status != ApprovalStatus.PENDING:
-            return Response(
-                {"error": "Langkah persetujuan ini belum aktif atau sudah diproses sebelumnya."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if action == "REJECT":
-            result, http_code = process_approval_action(
-                approval_id=approval_step.id,
-                lecturer=lecturer_obj,
-                action=action,
-                catatan=catatan,
-            )
-            return Response(result, status=http_code)
-
-        surat_req = approval_step.surat_request
-
-        for alias_key in ("final_approved_content", "approved_content", "final_content"):
-            if not submitted_final_content:
-                candidate_val = request.data.get(alias_key)
-                if isinstance(candidate_val, str) and candidate_val.strip():
-                    submitted_final_content = candidate_val.strip()
-
-        resolved_final_content = (
-            submitted_final_content.strip()
-            if isinstance(submitted_final_content, str) and submitted_final_content.strip()
-            else (
-                (surat_req.final_approved_content or "").strip()
-                or (surat_req.ai_original_draft or "").strip()
-            )
+        # Panggil fungsi service utama yang sudah rapi
+        result_data, http_code = process_approval_action(
+            approval_id=approval_id,
+            lecturer=lecturer_obj,
+            action=action,
+            catatan=catatan
         )
 
-        raw_status_override = request.data.get("final_status") or request.data.get("target_status")
-        if isinstance(raw_status_override, str) and raw_status_override.strip().upper() in (
-            SuratStatus.SENT,
-            SuratStatus.PRINTED,
-        ):
-            requested_final_status = raw_status_override.strip().upper()
-
-        approval_step.status = ApprovalStatus.APPROVED
-        approval_step.catatan = catatan
-        approval_step.created_at = timezone.now()
-        approval_step.save(update_fields=["status", "catatan", "created_at"])
-
-        next_step = SuratApproval.objects.filter(
-            surat_request=surat_req,
-            step_order=approval_step.step_order + 1,
-        ).first()
-
-        if next_step is not None:
-            next_step.status = ApprovalStatus.PENDING
-            next_step.save(update_fields=["status"])
-            surat_req.status = SuratStatus.IN_REVIEW
-            surat_req.final_approved_content = resolved_final_content
-            surat_req.save(update_fields=["status", "final_approved_content"])
-
-            SuratAuditLog.objects.create(
-                surat_request=surat_req,
-                action_id=f"APP_0{approval_step.step_order}",
-                action=f"APPROVED_STEP_{approval_step.step_order}_FORWARDED",
-            )
-            return Response(
-                {
-                    "status": "success",
-                    "message": "Persetujuan tahap ini berhasil. Surat diteruskan ke pejabat selanjutnya.",
-                    "request_id": surat_req.id,
-                    "surat_status": surat_req.status,
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        # Persetujuan tahap akhir: kunci final_approved_content dan delegasikan eksekusi
-        # alat (PDF, TTE, Cloudinary) serta Memory Agent ke background thread
-        surat_req.final_approved_content = resolved_final_content
-        surat_req.status = SuratStatus.APPROVED
-        surat_req.save(update_fields=["final_approved_content", "status"])
-
-        SuratAuditLog.objects.create(
-            surat_request=surat_req,
-            action_id="APP_FINAL",
-            action=f"APPROVED_BY_{lecturer_obj.id}_ASYNC_PIPELINE_DISPATCHED",
-        )
-
-        worker_thread = threading.Thread(
-            target=_execute_approval_pipeline_worker,
-            kwargs={
-                "surat_request_id": surat_req.id,
-                "lecturer_id": lecturer_obj.id,
-                "final_approved_content": resolved_final_content,
-                "final_status": requested_final_status,
-                "execution_tools": self.get_execution_tools(),
-                "memory_agent": self.get_memory_agent(),
-            },
-            name=f"surat-approval-pipeline-{surat_req.id}",
-            daemon=True,
-        )
-        LecturerApprovalActionAPIView._last_worker_thread = worker_thread
-        worker_thread.start()
-
-        return Response(
-            {
-                "status": "success",
-                "message": (
-                    "Persetujuan final diterima. Pembuatan TTE, QR Code, PDF Cloudinary, "
-                    "dan pembelajaran memori sedang diproses secara asinkron."
-                ),
-                "request_id": surat_req.id,
-                "approval_id": approval_step.id,
-                "surat_status": surat_req.status,
-                "target_final_status": requested_final_status,
-                "final_approved_content": surat_req.final_approved_content,
-                "nomor_surat_resmi": surat_req.nomor_surat_resmi,
-                "file_pdf_url": surat_req.file_pdf_url,
-            },
-            status=status.HTTP_200_OK,
-        )
+        return Response(result_data, status=http_code)
 
 
 class SuratVerifyAPIView(APIView):
