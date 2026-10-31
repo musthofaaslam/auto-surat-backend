@@ -87,11 +87,15 @@ def validate_si_mag(student_data):
     if not is_valid:
         raise serializers.ValidationError(msg)
 
-def validate_si_sur(student_data, student_courses_data):
-    is_enrolled, msg = verify_observation_course_enrolled(student_data, student_courses_data)
+def validate_si_sur(student_data, payload, student_courses_data):
+    student_nim = student_data.get("nim")
+    # Ambil kode mata kuliah dari payload yang diinput mahasiswa/AI
+    course_code = payload.get("kode_matkul") or payload.get("course_code", "")
+    
+    is_enrolled, msg = verify_observation_course_enrolled(student_nim, course_code, student_courses_data)
     if not is_enrolled:
         raise serializers.ValidationError(msg)
-
+    
 SURAT_VALIDATORS = {
     "SK-KUL": validate_sk_kul,
     "SK-BEA": validate_sk_bea,
