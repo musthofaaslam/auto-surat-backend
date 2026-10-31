@@ -720,7 +720,7 @@ class SuratDraftingAgent:
         )
         return revised_draft
 
-    def get_all_available_templates():
+    def get_all_available_templates(self):
         """
         Mengambil seluruh master data jenis surat dan field wajibnya 
         langsung dari database untuk diberikan sebagai referensi Intent Classification ke AI.
