@@ -105,8 +105,10 @@ CACHES = {
         "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            # Tambahkan baris ini jika menggunakan rediss:// (SSL) dari Upstash
-            "CONNECTION_POOL_CLASS": "redis.connection.ConnectionPool",
+            # Wajib ada untuk menangani protokol SSL 'rediss://' dari Upstash
+            "CONNECTION_POOL_KWARGS": {
+                "ssl_cert_reqs": None,
+            },
         }
     }
 }# DATABASES = {
