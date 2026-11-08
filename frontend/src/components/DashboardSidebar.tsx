@@ -1,6 +1,7 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import suratService from '../services/suratService';
 import {
   FileText,
   ShieldCheck,
@@ -16,11 +17,11 @@ import type { SuratType } from '../types';
 interface DashboardSidebarProps {
   isOpen: boolean;
   onClose: () => void;
-  activeMainView: 'dashboard' | 'verify';
-  onSelectMainView: (view: 'dashboard' | 'verify') => void;
-  onSelectLetterInForm: (kodeSurat: string) => void;
-  suratTypes: SuratType[];
-  selectedKodeSurat: string;
+  activeMainView?: 'dashboard' | 'verify';
+  onSelectMainView?: (view: 'dashboard' | 'verify') => void;
+  onSelectLetterInForm?: (kodeSurat: string) => void;
+  suratTypes?: SuratType[];
+  selectedKodeSurat?: string;
 }
 
 export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
@@ -29,36 +30,97 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   activeMainView,
   onSelectMainView,
   onSelectLetterInForm,
-  suratTypes,
+  suratTypes: propSuratTypes,
   selectedKodeSurat,
 }) => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [internalSuratTypes, setInternalSuratTypes] = useState<SuratType[]>([]);
+
+  useEffect(() => {
+    if (!propSuratTypes || propSuratTypes.length === 0) {
+      suratService.getSuratTypes().then(setInternalSuratTypes).catch(() => {});
+    }
+  }, [propSuratTypes]);
+
+  const activeSuratTypes =
+    propSuratTypes && propSuratTypes.length > 0 ? propSuratTypes : internalSuratTypes;
 
   const handleLogout = async () => {
     await logout();
-    window.location.href = '/login';
+    navigate('/login');
   };
 
   const isLecturerOrAdmin =
     user?.role === 'LECTURER' || user?.role === 'STAFF' || user?.role === 'ADMIN';
 
+  // Helper to ensure mobile drawer closes upon item click while desktop sidebar stays permanently visible
+  const handleItemNavigation = (action: () => void) => {
+    action();
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      onClose();
+    }
+  };
+
+  const handleGoDasbor = () => {
+    handleItemNavigation(() => {
+      if (onSelectMainView) {
+        onSelectMainView('dashboard');
+      }
+      if (location.pathname !== '/dashboard') {
+        navigate('/dashboard?view=dashboard');
+      }
+    });
+  };
+
+  const handleGoVerify = () => {
+    handleItemNavigation(() => {
+      if (onSelectMainView) {
+        onSelectMainView('verify');
+      }
+      if (location.pathname !== '/dashboard') {
+        navigate('/dashboard?view=verify');
+      }
+    });
+  };
+
+  const handleGoLetter = (kodeSurat: string) => {
+    handleItemNavigation(() => {
+      if (onSelectLetterInForm) {
+        onSelectLetterInForm(kodeSurat);
+      }
+      if (location.pathname !== '/dashboard') {
+        navigate(`/dashboard?surat=${kodeSurat}`);
+      }
+    });
+  };
+
   // Group letters into 3 academic categories
   const letterGroups = [
     {
       category: 'Surat Keterangan',
-      types: suratTypes.filter((s) => s.kode_surat.startsWith('SK-')),
+      types: activeSuratTypes.filter((s) => s.kode_surat.startsWith('SK-')),
     },
     {
       category: 'Surat Pengantar',
-      types: suratTypes.filter((s) => s.kode_surat.startsWith('SP-')),
+      types: activeSuratTypes.filter((s) => s.kode_surat.startsWith('SP-')),
     },
     {
       category: 'Surat Rekomendasi & Izin',
-      types: suratTypes.filter(
+      types: activeSuratTypes.filter(
         (s) => s.kode_surat.startsWith('SR-') || s.kode_surat.startsWith('SI-')
       ),
     },
   ];
+
+  const isDashboardActive =
+    location.pathname === '/dashboard' && (!activeMainView || activeMainView === 'dashboard');
+  const isVerifyActive =
+    (location.pathname === '/dashboard' && activeMainView === 'verify') ||
+    location.pathname.startsWith('/verify');
+  const isApprovalsActive = location.pathname === '/approvals';
 
   const sidebarContent = (
     <div className="flex flex-col h-full bg-white text-slate-900 border-r border-slate-200 select-none">
@@ -104,12 +166,9 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
 
           {/* Menu Dasbor (Formulir Surat & Sesi Chat AI) */}
           <button
-            onClick={() => {
-              onSelectMainView('dashboard');
-              onClose();
-            }}
+            onClick={handleGoDasbor}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition ${
-              activeMainView === 'dashboard'
+              isDashboardActive
                 ? 'bg-slate-900 text-white font-semibold shadow-2xs'
                 : 'text-slate-700 hover:bg-slate-100/80 hover:text-slate-900 font-normal'
             }`}
@@ -122,12 +181,9 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
 
           {/* Menu Verifikasi TTE */}
           <button
-            onClick={() => {
-              onSelectMainView('verify');
-              onClose();
-            }}
+            onClick={handleGoVerify}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition ${
-              activeMainView === 'verify'
+              isVerifyActive
                 ? 'bg-slate-900 text-white font-semibold shadow-2xs'
                 : 'text-slate-700 hover:bg-slate-100/80 hover:text-slate-900 font-normal'
             }`}
@@ -142,8 +198,16 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
           {isLecturerOrAdmin && (
             <Link
               to="/approvals"
-              onClick={onClose}
-              className="flex items-center justify-between px-3 py-2 rounded-lg text-xs font-normal text-slate-700 hover:bg-slate-100/80 hover:text-slate-900 transition"
+              onClick={() => {
+                if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                  onClose();
+                }
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition ${
+                isApprovalsActive
+                  ? 'bg-slate-900 text-white font-semibold shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100/80 hover:text-slate-900 font-normal'
+              }`}
             >
               <div className="flex items-center space-x-2.5">
                 <CheckSquare className="w-3.5 h-3.5 shrink-0 text-amber-600" />
@@ -169,14 +233,13 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
                 <div className="space-y-0.5">
                   {group.types.map((item) => {
                     const isSelected =
-                      activeMainView === 'dashboard' && selectedKodeSurat === item.kode_surat;
+                      location.pathname === '/dashboard' &&
+                      activeMainView === 'dashboard' &&
+                      selectedKodeSurat === item.kode_surat;
                     return (
                       <button
                         key={item.kode_surat}
-                        onClick={() => {
-                          onSelectLetterInForm(item.kode_surat);
-                          onClose();
-                        }}
+                        onClick={() => handleGoLetter(item.kode_surat)}
                         className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs transition flex items-center justify-between group ${
                           isSelected
                             ? 'bg-slate-100 text-slate-900 font-semibold'
@@ -234,22 +297,18 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
 
   return (
     <>
-      {/* Desktop Persistent Sidebar (Open by default) */}
-      <aside
-        className={`hidden lg:block w-72 h-screen shrink-0 transition-all duration-200 ${
-          isOpen ? 'translate-x-0' : '-translate-x-full lg:w-0 overflow-hidden'
-        }`}
-      >
+      {/* Desktop Persistent Sidebar (ALWAYS visible, permanent on desktop, never collapses) */}
+      <aside className="hidden lg:block w-72 h-screen shrink-0 bg-white border-r border-slate-200 z-30 select-none">
         {sidebarContent}
       </aside>
 
-      {/* Mobile Off-Canvas Drawer (Slides in from the left) */}
+      {/* Mobile Off-Canvas Drawer (Only for < lg screens, controlled by isOpen) */}
       {isOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
           {/* Backdrop Blur Overlay */}
           <div
             onClick={onClose}
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs transition-opacity"
             aria-hidden="true"
           />
 

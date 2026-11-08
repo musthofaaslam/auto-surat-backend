@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import suratService from '../services/suratService';
 import { extractErrorMessage } from '../services/api';
@@ -48,15 +48,33 @@ interface ChatMessageItem {
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  // Sidebar responsive state (open by default on desktop, closed on mobile)
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  // Sidebar responsive state: strictly FALSE by default so mobile users land directly on main content
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
   // Main View: 'dashboard' vs 'verify' (unified single-workspace architecture)
   const [activeMainView, setActiveMainView] = useState<'dashboard' | 'verify'>('dashboard');
 
   // Dashboard Sub-Mode: 'form' vs 'chat'
   const [activeDashboardTab, setActiveDashboardTab] = useState<'form' | 'chat'>('form');
+
+  // Sync with URL query parameters (?view=verify, ?surat=SK-KUL)
+  useEffect(() => {
+    const viewParam = searchParams.get('view');
+    if (viewParam === 'verify') {
+      setActiveMainView('verify');
+    } else if (viewParam === 'dashboard') {
+      setActiveMainView('dashboard');
+    }
+
+    const suratParam = searchParams.get('surat');
+    if (suratParam) {
+      setActiveMainView('dashboard');
+      setActiveDashboardTab('form');
+      setSelectedKodeSurat(suratParam);
+    }
+  }, [searchParams]);
 
   // Shared Master Data
   const [suratTypes, setSuratTypes] = useState<SuratType[]>([]);

@@ -34,10 +34,15 @@ export const Navbar: React.FC = () => {
   const isLecturerOrAdmin =
     user?.role === 'LECTURER' || user?.role === 'STAFF' || user?.role === 'ADMIN';
 
-  // Architectural Note (Sidebar Replacement on Dashboard):
-  // When on the user dashboard, the desktop top navbar is completely hidden.
-  // The persistent left sidebar acts as the primary navigation and session shell.
-  if (location.pathname === '/dashboard') {
+  // Architectural Note (Sidebar Global Replacement):
+  // When the user is authenticated, the desktop top navbar is completely hidden.
+  // The persistent left sidebar acts as the primary navigation and session shell across all views.
+  if (
+    isAuthenticated ||
+    location.pathname === '/dashboard' ||
+    location.pathname.startsWith('/surat') ||
+    location.pathname === '/approvals'
+  ) {
     return null;
   }
 
