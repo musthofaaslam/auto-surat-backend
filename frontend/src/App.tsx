@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import ProtectedRoute from './components/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
@@ -17,12 +18,13 @@ import VerifySuratPage from './pages/VerifySuratPage';
 
 export const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-          <Navbar />
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+            <Navbar />
 
-          <main className="flex-1">
+            <main className="flex-1">
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<LoginPage />} />
@@ -104,7 +106,8 @@ export const App: React.FC = () => {
         </div>
       </BrowserRouter>
     </AuthProvider>
-  );
+  </ErrorBoundary>
+);
 };
 
 export default App;

@@ -34,6 +34,13 @@ export const Navbar: React.FC = () => {
   const isLecturerOrAdmin =
     user?.role === 'LECTURER' || user?.role === 'STAFF' || user?.role === 'ADMIN';
 
+  // Architectural Note (Sidebar Replacement on Dashboard):
+  // When on the user dashboard, the desktop top navbar is completely hidden.
+  // The persistent left sidebar acts as the primary navigation and session shell.
+  if (location.pathname === '/dashboard') {
+    return null;
+  }
+
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 transition-all">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
