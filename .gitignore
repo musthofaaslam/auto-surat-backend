@@ -18,6 +18,7 @@ staticfiles/
 .env
 .env.*
 !.env.example
+mise.toml
 
 # --- IDE & Editors ---
 .idea/
@@ -41,4 +42,9 @@ backend-django/surat/agents/verify_stage*.py
 
 # --- Skills & Agents (Local only) ---
 .agents/
+.agents
+agents/
+agents
 skills-lock.json
+.taste-skill/
+

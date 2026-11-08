@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Download, ExternalLink, AlertCircle } from 'lucide-react';
+import { FileText, Download, ExternalLink, ShieldCheck, Clock } from 'lucide-react';
 
 interface PDFViewerProps {
   pdfUrl: string | null;
@@ -7,9 +7,10 @@ interface PDFViewerProps {
   documentTitle?: string;
 }
 
-// Architectural Note:
+// Architectural Note (Taste-Skill 2.5):
 // Robust PDF previewer providing iframe presentation, direct download fallback,
 // and informational placeholder when the document is still in pre-approval phase.
+// Renders responsively at all breakpoints (1440, 1024, 768, 390).
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({
   pdfUrl,
@@ -18,46 +19,50 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
 }) => {
   if (!pdfUrl) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 rounded-lg bg-slate-50 text-center">
-        <div className="p-3 bg-slate-200 rounded-full text-slate-600 mb-3">
-          <AlertCircle className="w-8 h-8" />
+      <div className="flex flex-col items-center justify-center p-8 sm:p-12 border-2 border-dashed border-slate-300 rounded-lg bg-slate-50/70 text-center tactile-card">
+        <div className="w-12 h-12 bg-blue-50 text-blue-700 rounded-full flex items-center justify-center mb-3.5 border border-blue-200">
+          <Clock className="w-6 h-6 animate-pulse" />
         </div>
-        <h3 className="text-base font-semibold text-slate-800">
-          Berkas PDF Belum Diterbitkan
+        <h3 className="text-sm font-semibold text-slate-900">
+          Naskah PDF Dalam Antrean Penerbitan
         </h3>
-        <p className="text-sm text-slate-500 max-w-md mt-1">
-          Dokumen PDF resmi beserta TTE (Tanda Tangan Elektronik) dan QR Code verifikasi
-          akan digenerate secara otomatis oleh backend segera setelah pejabat berwenang
-          memberikan persetujuan final (APPROVE).
+        <p className="text-xs text-slate-500 max-w-md mt-1.5 leading-relaxed">
+          Dokumen PDF resmi berstandar tata naskah dinas, lengkap dengan Tanda Tangan Elektronik
+          (TTE) terenkripsi SHA-256 dan QR Code verifikasi publik, akan digenerate otomatis
+          segera setelah pejabat berwenang menyetujui draf ini.
         </p>
+        <div className="mt-4 inline-flex items-center text-[11px] font-mono text-slate-600 bg-white px-3 py-1 rounded border border-slate-200">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 mr-1.5" />
+          <span>Pipeline Fase 2 & 4 Otomatis Aktif Saat Approved</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+    <div className="flex flex-col h-full bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden tactile-card">
       {/* Top Action Bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-        <div className="flex items-center space-x-2">
-          <FileText className="w-5 h-5 text-slate-600" />
-          <span className="text-sm font-medium text-slate-800 truncate">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 bg-slate-50 border-b border-slate-200 gap-2">
+        <div className="flex items-center space-x-2 truncate">
+          <FileText className="w-4 h-4 text-slate-700 shrink-0" />
+          <span className="text-xs font-semibold text-slate-900 truncate">
             {nomorSurat ? `Nomor: ${nomorSurat}` : documentTitle}
           </span>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 shrink-0">
           <a
             href={pdfUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition"
+            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 shadow-2xs transition tactile-btn"
           >
-            <ExternalLink className="w-3.5 h-3.5 mr-1" />
+            <ExternalLink className="w-3.5 h-3.5 mr-1 text-slate-500" />
             Buka Tab Baru
           </a>
           <a
             href={pdfUrl}
             download
-            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-slate-900 rounded hover:bg-slate-800 transition"
+            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-slate-900 rounded hover:bg-slate-800 shadow-xs transition tactile-btn"
           >
             <Download className="w-3.5 h-3.5 mr-1" />
             Unduh PDF
@@ -66,10 +71,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
       </div>
 
       {/* PDF Viewport */}
-      <div className="relative w-full h-[640px] bg-slate-100">
+      <div className="relative w-full h-[500px] sm:h-[620px] bg-slate-100">
         <iframe
           src={pdfUrl}
-          title="Preview Dokumen Surat"
+          title="Preview Dokumen Surat Resmi"
           className="w-full h-full border-0"
         />
       </div>
@@ -78,4 +83,3 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
 };
 
 export default PDFViewer;
-

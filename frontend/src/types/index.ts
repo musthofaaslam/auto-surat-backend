@@ -8,6 +8,7 @@ export type SuratStatusCode =
   | 'SUBMITTED'
   | 'REVISION_REQUIRED'
   | 'PENDING_APPROVAL'
+  | 'IN_REVIEW'
   | 'APPROVED'
   | 'REJECTED'
   | 'PROCESSED'
@@ -73,7 +74,7 @@ export interface SuratApproval {
   approver: number;
   approver_name: string | null;
   approver_nip: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'WAITING' | 'PENDING' | 'APPROVED' | 'REJECTED';
   catatan: string | null;
   created_at: string;
 }
@@ -120,6 +121,8 @@ export interface SuratRequestDetail {
   approvals: SuratApproval[];
   signatures: TteSignature[];
   audit_logs: SuratAuditLog[];
+  chosen_destination?: 'email' | 'telegram' | null;
+  target_destination_address?: string | null;
 }
 
 export interface ChatThreadInitResponse {

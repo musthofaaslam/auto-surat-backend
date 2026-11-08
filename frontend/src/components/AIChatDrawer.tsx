@@ -11,6 +11,11 @@ import {
   RefreshCw,
   Sparkles,
   HelpCircle,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare,
+  Zap,
 } from 'lucide-react';
 import type { DynamicFieldDef } from '../types';
 
@@ -29,9 +34,9 @@ interface AIChatDrawerProps {
   }) => void;
 }
 
-// Architectural Note:
-// Integrates stateful session management with the backend Chat Workflow and Redis slot memory.
-// Automatically displays slot-filling progression and transitions directly to formal drafting.
+// Architectural Note (Taste-Skill 2.5 - AI Workstation):
+// Stateful conversational agent interface. Real-time slot extraction telemetry,
+// quick-start prompt suggestions, and seamless transition to official document drafting.
 
 export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
   initialDocumentType,
@@ -46,8 +51,15 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
   const [collectedSlots, setCollectedSlots] = useState<Record<string, any>>({});
   const [requiredFields, setRequiredFields] = useState<DynamicFieldDef[]>([]);
   const [isReadyToDraft, setIsReadyToDraft] = useState(false);
+  const [mobileSlotsOpen, setMobileSlotsOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const promptSuggestions = [
+    'Saya butuh surat keterangan aktif kuliah untuk beasiswa PT Pertamina semester ini.',
+    'Mohon buatkan surat rekomendasi magang di PT Telkom Indonesia divisi Backend.',
+    'Pengantar izin riset skripsi di Rumah Sakit Umum Daerah selama 3 bulan.',
+  ];
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -73,9 +85,9 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         {
           sender: 'assistant',
           text:
-            'Halo! Saya asisten cerdas persuratan kampus berbasis Agentic AI. ' +
-            'Silakan jelaskan surat dinas yang Anda perlukan dan tujuannya dalam bahasa alami. ' +
-            'Saya akan membantu memvalidasi kelengkapan data sebelum diteruskan ke dosen.',
+            'Halo! Saya asisten cerdas persuratan dinas akademik. ' +
+            'Silakan jelaskan surat dinas yang Anda perlukan beserta tujuannya dalam bahasa alami. ' +
+            'Saya akan mengekstrak atribut wajib dan memvalidasi kelengkapannya secara otomatis.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -86,7 +98,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       setMessages([
         {
           sender: 'system',
-          text: 'Gagal menginisialisasi sesi percakapan. Pastikan koneksi backend aktif.',
+          text: 'Gagal menginisialisasi sesi percakapan dengan agen AI. Pastikan server backend aktif.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -95,11 +107,11 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputMessage.trim() || !threadId || isLoading) return;
+  const handleSendMessage = async (textToSend?: string) => {
+    const message = textToSend || inputMessage;
+    if (!message.trim() || !threadId || isLoading) return;
 
-    const userText = inputMessage.trim();
+    const userText = message.trim();
     setInputMessage('');
 
     const userMsgObj: Message = {
@@ -141,7 +153,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         ...prev,
         {
           sender: 'system',
-          text: 'Terjadi gangguan saat memproses pesan ke agen AI. Silakan coba kembali.',
+          text: 'Terjadi gangguan komunikasi dengan agen Gemini. Silakan coba kirim ulang.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -174,75 +186,100 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     });
   };
 
+  const filledCount = requiredFields.filter((f) => {
+    const val = collectedSlots[f.field];
+    return val !== undefined && val !== null && val !== '';
+  }).length;
+
+  const progressPercent = requiredFields.length > 0 ? Math.round((filledCount / requiredFields.length) * 100) : 0;
+
   return (
-    <div className="flex flex-col h-[650px] bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3.5 bg-slate-900 text-white">
-        <div className="flex items-center space-x-2.5">
-          <div className="w-7 h-7 rounded bg-slate-800 flex items-center justify-center text-slate-200">
-            <Bot className="w-4 h-4" />
+    <div className="ts-card flex flex-col h-[700px] bg-white overflow-hidden shadow-md">
+      {/* 1. HEADER */}
+      <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white">
+        <div className="flex items-center space-x-3">
+          <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-blue-400 shadow-2xs">
+            <Bot className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-xs font-semibold tracking-tight">
-              Konsultasi & Ekstraksi Draf Surat AI
-            </h3>
-            <p className="text-[10px] text-slate-400">
+            <div className="flex items-center space-x-2">
+              <h3 className="text-sm font-bold tracking-tight">
+                AutoSurat Intelligent Assistant
+              </h3>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">
+                Gemini 3.1 Flash Lite
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
               {detectedIntent
-                ? `Terdeteksi: ${detectedIntent}`
-                : 'Menunggu analisis jenis surat dari percakapan'}
+                ? `Jenis Surat Terdeteksi: [${detectedIntent}]`
+                : 'Menunggu penjelasan kebutuhan surat dinas Anda'}
             </p>
           </div>
         </div>
 
-        <button
-          onClick={initChatThread}
-          title="Mulai sesi baru"
-          className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center space-x-3">
+          {requiredFields.length > 0 && (
+            <button
+              onClick={() => setMobileSlotsOpen(!mobileSlotsOpen)}
+              className="md:hidden inline-flex items-center text-xs bg-slate-800 text-slate-200 px-2.5 py-1 rounded"
+            >
+              <Layers className="w-3.5 h-3.5 mr-1" />
+              <span>{filledCount}/{requiredFields.length}</span>
+              {mobileSlotsOpen ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />}
+            </button>
+          )}
+
+          <button
+            onClick={initChatThread}
+            title="Mulai sesi baru"
+            className="p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition ts-btn"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      {/* Main Container */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Chat History */}
-        <div className="flex-1 flex flex-col p-4 overflow-y-auto bg-slate-50/50 space-y-3">
+      {/* 2. CHAT HISTORY & SLOT SIDEBAR */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        {/* Chat History Panel */}
+        <div className="flex-1 flex flex-col p-6 overflow-y-auto bg-slate-50/60 space-y-4">
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex items-start space-x-2 max-w-[85%] ${
+              className={`flex items-start space-x-3 max-w-[85%] ${
                 msg.sender === 'user' ? 'ml-auto flex-row-reverse space-x-reverse' : ''
               }`}
             >
               <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
                   msg.sender === 'user'
                     ? 'bg-slate-900 text-white'
                     : msg.sender === 'assistant'
                     ? 'bg-blue-600 text-white'
-                    : 'bg-amber-100 text-amber-700'
+                    : 'bg-amber-100 text-amber-800'
                 }`}
               >
                 {msg.sender === 'user' ? (
-                  <UserIcon className="w-3 h-3" />
+                  <UserIcon className="w-4 h-4" />
                 ) : (
-                  <Bot className="w-3 h-3" />
+                  <Bot className="w-4 h-4" />
                 )}
               </div>
 
               <div
-                className={`rounded-lg px-3.5 py-2.5 text-xs leading-relaxed ${
+                className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
                   msg.sender === 'user'
-                    ? 'bg-slate-900 text-white'
+                    ? 'bg-slate-900 text-white shadow-xs'
                     : msg.sender === 'assistant'
-                    ? 'bg-white border border-slate-200 text-slate-800 shadow-xs'
-                    : 'bg-amber-50 border border-amber-200 text-amber-800'
+                    ? 'bg-white border border-slate-200 text-slate-900 shadow-2xs'
+                    : 'bg-amber-50 border border-amber-200 text-amber-900'
                 }`}
               >
                 <p className="whitespace-pre-wrap">{msg.text}</p>
                 <span
-                  className={`block text-[9px] mt-1 ${
-                    msg.sender === 'user' ? 'text-slate-400' : 'text-slate-400'
+                  className={`block text-[10px] font-mono mt-1.5 ${
+                    msg.sender === 'user' ? 'text-slate-400 text-right' : 'text-slate-400'
                   }`}
                 >
                   {msg.timestamp}
@@ -252,15 +289,15 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
           ))}
 
           {isLoading && (
-            <div className="flex items-center space-x-2 max-w-[70%]">
-              <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">
-                <Bot className="w-3 h-3" />
+            <div className="flex items-center space-x-3 max-w-[70%]">
+              <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">
+                <Bot className="w-4 h-4" />
               </div>
-              <div className="bg-white border border-slate-200 rounded-lg px-3.5 py-2 text-xs text-slate-500 shadow-xs flex items-center space-x-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse"></span>
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse delay-150"></span>
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse delay-300"></span>
-                <span className="text-[11px] ml-1">Menganalisa konteks...</span>
+              <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 shadow-2xs flex items-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse delay-150" />
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse delay-300" />
+                <span className="text-xs font-medium ml-1">Menganalisis konteks percakapan & mengekstrak data...</span>
               </div>
             </div>
           )}
@@ -269,13 +306,35 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         </div>
 
         {/* Dynamic Slot Checklist Sidebar */}
-        <div className="w-64 border-l border-slate-200 bg-white p-3.5 flex flex-col overflow-y-auto">
-          <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-800 pb-2 border-b border-slate-200">
-            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-            <span>Ekstraksi Atribut</span>
+        <div
+          className={`${
+            mobileSlotsOpen ? 'flex' : 'hidden md:flex'
+          } w-full md:w-72 border-t md:border-t-0 md:border-l border-slate-200 bg-white p-5 flex-col overflow-y-auto max-h-72 md:max-h-full`}
+        >
+          <div className="pb-3 border-b border-slate-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-1.5 text-xs font-bold uppercase tracking-wider text-slate-900">
+                <Sparkles className="w-4 h-4 text-blue-600" />
+                <span>Atribut Surat Dinas</span>
+              </div>
+              {requiredFields.length > 0 && (
+                <span className="text-xs font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                  {filledCount}/{requiredFields.length}
+                </span>
+              )}
+            </div>
+
+            {requiredFields.length > 0 && (
+              <div className="mt-2.5 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-emerald-600 h-full transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            )}
           </div>
 
-          <div className="mt-2.5 flex-1 space-y-2">
+          <div className="mt-4 flex-1 space-y-2.5">
             {requiredFields.length > 0 ? (
               requiredFields.map((field) => {
                 const isFilled =
@@ -286,34 +345,37 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
                 return (
                   <div
                     key={field.field}
-                    className={`p-2 rounded border text-xs ${
+                    className={`p-3 rounded-lg border text-xs transition-all ${
                       isFilled
-                        ? 'border-emerald-200 bg-emerald-50/40 text-emerald-900'
+                        ? 'border-emerald-200 bg-emerald-50/50 text-emerald-950'
                         : 'border-slate-200 bg-slate-50/50 text-slate-600'
                     }`}
                   >
-                    <div className="flex items-center justify-between font-medium">
+                    <div className="flex items-center justify-between font-semibold">
                       <span className="truncate pr-1">{field.label}</span>
                       {isFilled ? (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                       ) : (
-                        <Circle className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                        <Circle className="w-4 h-4 text-slate-300 shrink-0" />
                       )}
                     </div>
-                    {isFilled && (
-                      <div className="text-[11px] text-slate-700 font-mono mt-1 truncate">
+                    {isFilled ? (
+                      <div className="text-[11px] text-slate-800 font-mono mt-1 truncate font-medium">
                         {String(collectedSlots[field.field])}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                        {field.description}
                       </div>
                     )}
                   </div>
                 );
               })
             ) : (
-              <div className="flex flex-col items-center justify-center p-6 text-center text-slate-400">
-                <HelpCircle className="w-6 h-6 mb-1 text-slate-300" />
-                <p className="text-[11px] leading-tight">
-                  Tuliskan keperluan surat Anda di kolom pesan untuk mendeteksi atribut yang wajib
-                  diisi.
+              <div className="flex flex-col items-center justify-center p-8 text-center text-slate-400">
+                <HelpCircle className="w-8 h-8 mb-2 text-slate-300" />
+                <p className="text-xs leading-relaxed">
+                  Tuliskan jenis surat dan tujuan Anda pada kotak pesan untuk mendeteksi atribut dinas secara otomatis.
                 </p>
               </div>
             )}
@@ -321,38 +383,58 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
 
           {/* Quick Action when ready */}
           {isReadyToDraft && (
-            <div className="pt-3 border-t border-slate-200">
+            <div className="pt-4 border-t border-slate-200 mt-3">
               <button
                 onClick={handleProceedToForm}
-                className="w-full inline-flex items-center justify-center px-3 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded transition shadow-xs"
+                className="w-full inline-flex items-center justify-center px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition shadow-xs ts-btn"
               >
-                <span>Proses Draf Surat</span>
-                <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+                <span>Proses Draf Surat Resmi</span>
+                <ArrowRight className="w-4 h-4 ml-2" />
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Input Form */}
+      {/* 3. PROMPT SUGGESTIONS (VISIBLE WHEN FEW MESSAGES) */}
+      {messages.length <= 2 && (
+        <div className="px-6 py-2 bg-slate-50 border-t border-slate-200 flex items-center space-x-2 overflow-x-auto">
+          <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+          <span className="text-[11px] font-semibold text-slate-500 shrink-0">Contoh:</span>
+          {promptSuggestions.map((suggestion, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleSendMessage(suggestion)}
+              className="text-xs text-slate-700 bg-white hover:bg-slate-100 px-3 py-1 rounded-full border border-slate-200 whitespace-nowrap transition ts-btn shrink-0"
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 4. INPUT COMPOSER */}
       <form
-        onSubmit={handleSendMessage}
-        className="p-3 bg-white border-t border-slate-200 flex items-center space-x-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSendMessage();
+        }}
+        className="p-4 bg-white border-t border-slate-200 flex items-center space-x-3"
       >
         <input
           type="text"
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
-          placeholder="Ketik konteks pengajuan surat Anda di sini..."
+          placeholder="Ketik konteks pengajuan surat dinas Anda di sini..."
           disabled={isLoading}
-          className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900 focus:border-slate-900 transition"
+          className="flex-1 px-4 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900 focus:border-slate-900 transition"
         />
         <button
           type="submit"
           disabled={isLoading || !inputMessage.trim()}
-          className="inline-flex items-center px-4 py-2 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed rounded transition"
+          className="h-10 px-5 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-xs transition ts-btn"
         >
-          <Send className="w-3.5 h-3.5 mr-1.5" />
+          <Send className="w-4 h-4 mr-2" />
           Kirim
         </button>
       </form>

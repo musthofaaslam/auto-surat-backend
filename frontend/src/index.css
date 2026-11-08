@@ -1,17 +1,124 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  }
+/* 
+  AutoSurat Agentic AI - TasteSkill 2.5 Design System
+  Strict typography, optical hairlines, tactile interactions, and authentic official letter rendering.
+*/
 
-  body {
-    font-family: var(--font-sans);
-    background-color: #f8fafc;
-    color: #0f172a;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    margin: 0;
-    padding: 0;
-  }
+:root {
+  /* Colors */
+  --p-bg: #f8fafc;
+  --p-surface: #ffffff;
+  --p-card: #ffffff;
+  --p-ink: #0f172a;
+  --p-muted: #64748b;
+  --p-border: rgba(15, 23, 42, 0.08);
+  --p-border-strong: rgba(15, 23, 42, 0.16);
+  --p-accent: #0f172a;
+  --p-accent-ink: #ffffff;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Times New Roman", Times, Georgia, Cambria, serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
+  /* Rhythms & Radii */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--p-bg);
+  color: var(--p-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+/* Taste-Skill 2.5 Executive Card */
+.ts-card {
+  background: var(--p-card);
+  border: 1px solid var(--p-border);
+  border-radius: var(--r-lg);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px -2px rgba(15, 23, 42, 0.02);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ts-card-interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--p-border-strong);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px -4px rgba(15, 23, 42, 0.06);
+}
+
+/* Taste-Skill 2.5 Tactile Button */
+.ts-btn {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ts-btn:hover {
+  transform: translateY(-1px);
+}
+
+.ts-btn:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+/* Authentic Official Academic Letter Sheet (Kop Dinas & A4 Canvas) */
+.official-letter-sheet {
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 30px rgba(0, 0, 0, 0.08);
+  font-family: var(--font-serif);
+  line-height: 1.6;
+}
+
+/* Official Seal Hologram / Digital Stamp */
+.tte-digital-seal {
+  position: relative;
+  border: 2px dashed #059669;
+  background: rgba(16, 185, 129, 0.03);
+}
+
+/* High-Density Monospace Blocks */
+.ts-code-block {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: var(--r-md);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }

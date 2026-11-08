@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import suratService from '../services/suratService';
 import type { VerificationData } from '../types';
 import {
@@ -12,11 +12,11 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  ArrowLeft,
+  Calendar,
+  Building2,
+  GraduationCap,
 } from 'lucide-react';
-
-// Architectural Note:
-// Public-facing cryptographic verification gateway. Validates electronic signature (TTE)
-// authenticity via sha256 document hashing and unforgeable unique token verification.
 
 export const VerifySuratPage: React.FC = () => {
   const { token: urlToken } = useParams<{ token?: string }>();
@@ -42,11 +42,11 @@ export const VerifySuratPage: React.FC = () => {
         setData({
           status: 'INVALID',
           message:
-            'Dokumen Surat TIDAK VALID atau palsu. Token verifikasi tidak ditemukan di sistem kampus.',
+            'Dokumen Surat TIDAK VALID atau palsu. Token verifikasi tidak terdaftar pada repositori persuratan dinas resmi.',
         });
       } else {
         setErrorMessage(
-          err.response?.data?.message || 'Gagal menghubungi server verifikasi dokumen.'
+          err.response?.data?.message || 'Gagal menghubungi server verifikasi dokumen persuratan.'
         );
       }
     } finally {
@@ -69,124 +69,145 @@ export const VerifySuratPage: React.FC = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
-      {/* Title */}
-      <div className="text-center space-y-2">
-        <div className="w-12 h-12 bg-slate-900 text-white rounded-lg flex items-center justify-center mx-auto shadow-xs">
-          <ShieldCheck className="w-6 h-6" />
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-8">
+      {/* Title Header */}
+      <div className="text-center space-y-3">
+        <Link
+          to="/dashboard"
+          className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-900 transition px-3 py-1.5 rounded-md hover:bg-slate-100"
+        >
+          <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
+          <span>Kembali ke Beranda Sistem</span>
+        </Link>
+        <div className="w-14 h-14 bg-slate-900 text-white rounded-2xl flex items-center justify-center mx-auto shadow-md border border-slate-800">
+          <ShieldCheck className="w-7 h-7 text-emerald-400" />
         </div>
-        <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-          Verifikasi Publik Keaslian Surat Resmi (TTE)
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+          Verifikasi Publik Keaslian TTE Dokumen
         </h1>
-        <p className="text-xs text-slate-500 max-w-md mx-auto">
+        <p className="text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
           Pusat validasi keabsahan dokumen persuratan dinas akademik. Masukkan kode token verifikasi
-          atau scan QR Code pada naskah surat.
+          atau pindai QR Code TTE yang tertera pada naskah surat fisik/digital.
         </p>
       </div>
 
       {/* Search Token Input */}
-      <form onSubmit={handleSubmit} className="bg-white p-4 border border-slate-200 rounded-lg shadow-xs flex items-center space-x-2">
-        <div className="relative flex-1">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-            <Hash className="w-4 h-4" />
+      <form onSubmit={handleSubmit} className="ts-card p-4 sm:p-5 bg-white border border-slate-300 shadow-md">
+        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+          Token / Kode Verifikasi Dokumen
+        </label>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+              <Hash className="w-5 h-5" />
+            </div>
+            <input
+              type="text"
+              value={inputToken}
+              onChange={(e) => setInputToken(e.target.value)}
+              placeholder="Contoh: a1b2c3d4e5f67890..."
+              className="block w-full pl-11 pr-4 py-3 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-slate-900 bg-slate-50 focus:bg-white placeholder-slate-400 font-mono transition"
+            />
           </div>
-          <input
-            type="text"
-            value={inputToken}
-            onChange={(e) => setInputToken(e.target.value)}
-            placeholder="Masukkan kode token verifikasi (contoh: a1b2c3d4e5f6...)"
-            className="block w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-slate-900 focus:border-slate-900 bg-white placeholder-slate-400 font-mono"
-          />
+          <button
+            type="submit"
+            disabled={isLoading || !inputToken.trim()}
+            className="inline-flex justify-center items-center px-6 py-3 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 rounded-lg shadow-sm transition shrink-0"
+          >
+            {isLoading ? (
+              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+            ) : (
+              <Search className="w-4 h-4 mr-2" />
+            )}
+            <span>Verifikasi Dokumen</span>
+          </button>
         </div>
-        <button
-          type="submit"
-          disabled={isLoading || !inputToken.trim()}
-          className="inline-flex items-center px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 rounded transition"
-        >
-          {isLoading ? (
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <>
-              <Search className="w-3.5 h-3.5 mr-1.5" />
-              <span>Verifikasi</span>
-            </>
-          )}
-        </button>
       </form>
 
       {errorMessage && (
-        <div className="p-4 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
-          <span>{errorMessage}</span>
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-sm text-amber-800 flex items-center space-x-3 shadow-sm">
+          <AlertCircle className="w-5 h-5 shrink-0 text-amber-600" />
+          <span className="font-medium">{errorMessage}</span>
         </div>
       )}
 
       {/* Verification Result Card */}
       {data && (
         <div
-          className={`bg-white border rounded-lg p-6 shadow-xs space-y-6 ${
-            data.status === 'VALID' ? 'border-emerald-300' : 'border-rose-300'
+          className={`ts-card p-6 sm:p-8 bg-white border-2 shadow-lg space-y-6 ${
+            data.status === 'VALID' ? 'border-emerald-500 ring-4 ring-emerald-50' : 'border-rose-500 ring-4 ring-rose-50'
           }`}
         >
           {/* Status Indicator */}
-          <div className="flex items-center space-x-3 pb-4 border-b border-slate-100">
+          <div className="flex items-center space-x-4 pb-6 border-b border-slate-200">
             {data.status === 'VALID' ? (
-              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-6 h-6" />
+              <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-300 shadow-sm">
+                <CheckCircle2 className="w-8 h-8" />
               </div>
             ) : (
-              <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-                <ShieldAlert className="w-6 h-6" />
+              <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-300 shadow-sm">
+                <ShieldAlert className="w-8 h-8" />
               </div>
             )}
             <div>
               <div
-                className={`text-sm font-bold uppercase tracking-wider ${
+                className={`text-base sm:text-lg font-bold tracking-tight uppercase ${
                   data.status === 'VALID' ? 'text-emerald-800' : 'text-rose-800'
                 }`}
               >
-                {data.status === 'VALID' ? 'DOKUMEN ASLI & TERVERIFIKASI' : 'DOKUMEN TIDAK VALID'}
+                {data.status === 'VALID' ? 'DOKUMEN RESMI TERCATAT & TERVERIFIKASI' : 'DOKUMEN TIDAK TERVERIFIKASI'}
               </div>
-              <p className="text-xs text-slate-600 mt-0.5">{data.message}</p>
+              <p className="text-sm text-slate-600 mt-1 leading-relaxed">{data.message}</p>
             </div>
           </div>
 
           {/* Valid Details */}
           {data.status === 'VALID' && (
-            <div className="space-y-6 text-xs">
+            <div className="space-y-6">
               {/* Surat Detail */}
               {data.detail_surat && (
                 <div className="space-y-3">
-                  <div className="flex items-center space-x-2 text-slate-700 font-bold uppercase tracking-wider text-[11px]">
-                    <FileText className="w-4 h-4 text-slate-600" />
-                    <span>Rincian Dokumen Resmi</span>
+                  <div className="flex items-center space-x-2 text-slate-800 font-bold uppercase tracking-wider text-xs">
+                    <FileText className="w-4 h-4 text-indigo-600" />
+                    <span>Rincian Naskah Dinas Resmi</span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-4 rounded border border-slate-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200">
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Nomor Surat Resmi</span>
-                      <span className="font-mono font-bold text-slate-900">
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Nomor Surat Resmi
+                      </span>
+                      <span className="font-mono font-bold text-base text-slate-900">
                         {data.detail_surat.nomor_surat_resmi || '-'}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Jenis Surat</span>
-                      <span className="font-semibold text-slate-800">
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Jenis Dokumen
+                      </span>
+                      <span className="font-bold text-sm text-slate-900">
                         {data.detail_surat.jenis_surat}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Kategori</span>
-                      <span className="text-slate-700">{data.detail_surat.kategori}</span>
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Kategori Klasifikasi
+                      </span>
+                      <span className="text-sm text-slate-800">{data.detail_surat.kategori}</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Tanggal Terbit</span>
-                      <span className="text-slate-700">
-                        {new Date(data.detail_surat.tanggal_terbit).toLocaleDateString('id-ID', {
-                          day: 'numeric',
-                          month: 'long',
-                          year: 'numeric',
-                        })}
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Tanggal Penerbitan
                       </span>
+                      <div className="flex items-center text-sm text-slate-800 font-medium">
+                        <Calendar className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
+                        <span>
+                          {new Date(data.detail_surat.tanggal_terbit).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -195,28 +216,42 @@ export const VerifySuratPage: React.FC = () => {
               {/* Mahasiswa Info */}
               {data.mahasiswa && (
                 <div className="space-y-3">
-                  <div className="flex items-center space-x-2 text-slate-700 font-bold uppercase tracking-wider text-[11px]">
-                    <User className="w-4 h-4 text-slate-600" />
-                    <span>Identitas Pemohon</span>
+                  <div className="flex items-center space-x-2 text-slate-800 font-bold uppercase tracking-wider text-xs">
+                    <User className="w-4 h-4 text-indigo-600" />
+                    <span>Identitas Pemohon Dokumen</span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-4 rounded border border-slate-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200">
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Nama Mahasiswa</span>
-                      <span className="font-semibold text-slate-800">{data.mahasiswa.nama}</span>
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Nama Lengkap Mahasiswa
+                      </span>
+                      <span className="font-bold text-sm text-slate-900">{data.mahasiswa.nama}</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">NIM</span>
-                      <span className="font-mono font-medium text-slate-800">
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Nomor Induk Mahasiswa (NIM)
+                      </span>
+                      <span className="font-mono font-bold text-sm text-slate-900">
                         {data.mahasiswa.nim}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Program Studi</span>
-                      <span className="text-slate-700">{data.mahasiswa.prodi}</span>
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Program Studi
+                      </span>
+                      <div className="flex items-center text-sm text-slate-800">
+                        <GraduationCap className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
+                        <span>{data.mahasiswa.prodi}</span>
+                      </div>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Fakultas</span>
-                      <span className="text-slate-700">{data.mahasiswa.fakultas}</span>
+                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                        Fakultas
+                      </span>
+                      <div className="flex items-center text-sm text-slate-800">
+                        <Building2 className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
+                        <span>{data.mahasiswa.fakultas}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -225,29 +260,36 @@ export const VerifySuratPage: React.FC = () => {
               {/* TTE Cryptographic Evidence */}
               {data.tte_info && (
                 <div className="space-y-3">
-                  <div className="flex items-center space-x-2 text-slate-700 font-bold uppercase tracking-wider text-[11px]">
+                  <div className="flex items-center space-x-2 text-slate-800 font-bold uppercase tracking-wider text-xs">
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <span>Bukti Kriptografis Tanda Tangan Elektronik</span>
+                    <span>Bukti Kriptografis Tanda Tangan Elektronik (TTE)</span>
                   </div>
-                  <div className="space-y-2 bg-slate-50 p-4 rounded border border-slate-200">
+                  <div className="space-y-3 bg-emerald-50/50 p-4 sm:p-5 rounded-xl border border-emerald-200">
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Pejabat Penandatangan</span>
-                      <span className="font-semibold text-slate-900">
+                      <span className="text-emerald-800 text-xs font-bold uppercase tracking-wider block mb-1">
+                        Pejabat Penandatangan Sah
+                      </span>
+                      <span className="font-bold text-sm text-slate-900">
                         {data.tte_info.penandatangan}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">
-                        Hash SHA-256 Integritas Naskah
+                      <span className="text-emerald-800 text-xs font-bold uppercase tracking-wider block mb-1">
+                        Integritas Naskah (SHA-256 Digest)
                       </span>
-                      <div className="font-mono text-[10px] text-slate-800 bg-white p-2 rounded break-all border border-slate-200 mt-0.5">
+                      <div className="font-mono text-xs text-slate-900 bg-white p-3 rounded-lg break-all border border-emerald-300 shadow-inner">
                         {data.tte_info.hash_sha256}
                       </div>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Waktu Penandatanganan</span>
-                      <span className="text-slate-700">
-                        {new Date(data.tte_info.tanggal_ttd).toLocaleString('id-ID')}
+                      <span className="text-emerald-800 text-xs font-bold uppercase tracking-wider block mb-1">
+                        Stempel Waktu Penandatanganan (Timestamp)
+                      </span>
+                      <span className="text-slate-800 font-mono text-xs font-medium">
+                        {new Date(data.tte_info.tanggal_ttd).toLocaleString('id-ID', {
+                          dateStyle: 'full',
+                          timeStyle: 'long',
+                        })}
                       </span>
                     </div>
                   </div>

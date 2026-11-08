@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
@@ -9,7 +9,7 @@ interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
 }
 
-// Architectural Note:
+// Architectural Note (Taste-Skill 2.5):
 // Declarative route-guarding mechanism supporting granular role-based access control (RBAC).
 // Prevents unauthenticated access and gracefully displays 403 status for unauthorized roles.
 
@@ -35,23 +35,23 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-        <div className="max-w-md w-full bg-white border border-slate-200 rounded-lg p-8 shadow-xs text-center">
-          <div className="inline-flex p-3 bg-rose-50 text-rose-600 rounded-full mb-4">
+        <div className="max-w-md w-full bg-white border border-slate-200 rounded-lg p-8 shadow-xs text-center tactile-card">
+          <div className="inline-flex p-3 bg-rose-50 text-rose-600 rounded-full mb-4 border border-rose-200">
             <ShieldAlert className="w-8 h-8" />
           </div>
-          <h2 className="text-lg font-semibold text-slate-900">Akses Ditolak</h2>
-          <p className="text-xs text-slate-600 mt-2">
+          <h2 className="text-lg font-bold text-slate-900">Akses Ditolak (403)</h2>
+          <p className="text-xs text-slate-600 mt-2 leading-relaxed">
             Halaman ini membutuhkan hak akses khusus ({allowedRoles.join(', ')}).
-            Akun Anda saat ini memiliki peran <span className="font-mono font-medium">{user.role}</span>.
+            Akun Anda saat ini memiliki peran <span className="font-mono font-semibold text-slate-800">{user.role}</span>.
           </p>
           <div className="mt-6">
-            <a
-              href="/dashboard"
-              className="inline-flex items-center px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition"
+            <Link
+              to="/dashboard"
+              className="inline-flex items-center px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded shadow-2xs transition tactile-btn"
             >
               <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
               Kembali ke Dasbor
-            </a>
+            </Link>
           </div>
         </div>
       </div>
@@ -62,3 +62,4 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
 };
 
 export default ProtectedRoute;
+
