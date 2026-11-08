@@ -49,8 +49,8 @@ export const AuthenticatedLayout: React.FC = () => {
           </div>
         </header>
 
-        {/* Scrollable Sub-Page Area */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Scrollable Sub-Page Area with Smooth Route Transition Motion */}
+        <div key={location.pathname} className="flex-1 overflow-y-auto motion-view-pane">
           <Outlet />
         </div>
       </div>

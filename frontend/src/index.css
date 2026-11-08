@@ -126,3 +126,102 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* ========================================================================= */
+/* AUTO-SURAT MOTION SYSTEM (TasteSkill 2.5 Motion Architecture)             */
+/* GPU-composited, zero-CLS, responsive micro-interactions & transitions     */
+/* ========================================================================= */
+
+:root {
+  /* Motion Timing Tokens */
+  --m-in: 150ms;
+  --m-out: 120ms;
+  --m-press: 90ms;
+  --m-panel: 240ms;
+  --m-slide: 220ms;
+  --m-enter-dur: 300ms;
+
+  /* Motion Curves (Non-overshooting spring & ease-outs) */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --m-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --m-ease-io: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* Staggered Initial Page Load Keyframes */
+@keyframes motion-enter-fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-enter-scale {
+  0% {
+    opacity: 0;
+    transform: scale(0.992) translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes motion-tab-fade-slide {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Reusable Motion Utility Classes */
+.motion-stagger-1 {
+  animation: motion-enter-fade-up var(--m-enter-dur) var(--m-ease-enter) both;
+  animation-delay: 40ms;
+}
+
+.motion-stagger-2 {
+  animation: motion-enter-fade-up calc(var(--m-enter-dur) + 60ms) var(--m-ease-enter) both;
+  animation-delay: 120ms;
+}
+
+.motion-stagger-3 {
+  animation: motion-enter-fade-up calc(var(--m-enter-dur) + 100ms) var(--m-ease-enter) both;
+  animation-delay: 200ms;
+}
+
+.motion-tab-pane {
+  animation: motion-tab-fade-slide var(--m-slide) var(--ease) both;
+}
+
+.motion-view-pane {
+  animation: motion-enter-scale 260ms var(--m-ease-enter) both;
+}
+
+/* Ultra-smooth backdrop overlay for mobile drawer */
+.smooth-mobile-backdrop {
+  background-color: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: opacity 350ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              backdrop-filter 350ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              -webkit-backdrop-filter 350ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: opacity, backdrop-filter;
+}
+
+/* Respect User Reduced Motion Preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

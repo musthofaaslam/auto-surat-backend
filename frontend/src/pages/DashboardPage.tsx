@@ -81,6 +81,25 @@ export const DashboardPage: React.FC = () => {
   const [requests, setRequests] = useState<SuratRequestListItem[]>([]);
   const [isLoadingRequests, setIsLoadingRequests] = useState<boolean>(true);
 
+  // Dedicated filter for Konten Utama (Riwayat Permohonan Naskah Dinas)
+  const [historyFilter, setHistoryFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('ALL');
+
+  const filteredRequests = requests.filter((req) => {
+    if (historyFilter === 'PENDING') {
+      return (
+        req.status === 'PENDING_APPROVAL' ||
+        req.status === 'IN_REVIEW' ||
+        req.status === 'SUBMITTED'
+      );
+    }
+    if (historyFilter === 'DONE') {
+      return (
+        req.status === 'APPROVED' || req.status === 'SENT' || req.status === 'PRINTED'
+      );
+    }
+    return true;
+  });
+
   // =========================================================================
   // FORM SURAT STATE (WITH DROPDOWN SELECTOR)
   // =========================================================================
@@ -108,7 +127,7 @@ export const DashboardPage: React.FC = () => {
   const [chatAttachments, setChatAttachments] = useState<File[]>([]);
   const [showMentionMenu, setShowMentionMenu] = useState<boolean>(false);
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatMessagesContainerRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Prompt suggestions for Chat AI
@@ -126,6 +145,19 @@ export const DashboardPage: React.FC = () => {
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [verifyErrorMsg, setVerifyErrorMsg] = useState<string | null>(null);
 
+  // Standalone requests loader for initial load & refresh button
+  const fetchRequests = async () => {
+    setIsLoadingRequests(true);
+    try {
+      const reqs = await suratService.getSuratRequests();
+      setRequests(reqs);
+    } catch {
+      // Fallback
+    } finally {
+      setIsLoadingRequests(false);
+    }
+  };
+
   // Initial Data Load
   useEffect(() => {
     const loadInitialData = async () => {
@@ -139,14 +171,7 @@ export const DashboardPage: React.FC = () => {
         // Fallback
       }
 
-      try {
-        const reqs = await suratService.getSuratRequests();
-        setRequests(reqs);
-      } catch {
-        // Fallback
-      } finally {
-        setIsLoadingRequests(false);
-      }
+      await fetchRequests();
     };
 
     loadInitialData();
@@ -159,12 +184,12 @@ export const DashboardPage: React.FC = () => {
     }
   }, [activeMainView, activeDashboardTab]);
 
-  // Auto-scroll chat to bottom
+  // Auto-scroll inside chat box only when new messages arrive, never shifting the outer webpage scroll
   useEffect(() => {
-    if (activeMainView === 'dashboard' && activeDashboardTab === 'chat') {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatMessagesContainerRef.current) {
+      chatMessagesContainerRef.current.scrollTop = chatMessagesContainerRef.current.scrollHeight;
     }
-  }, [chatMessages, isChatLoading, activeDashboardTab]);
+  }, [chatMessages]);
 
   const initChatSession = async (docType?: string) => {
     setIsChatLoading(true);
@@ -343,7 +368,7 @@ export const DashboardPage: React.FC = () => {
         if (reqId) {
           navigate(`/surat/${reqId}`);
         } else {
-          suratService.getSuratRequests().then(setRequests);
+          fetchRequests();
         }
       }, 1200);
     } catch (err: any) {
@@ -434,14 +459,18 @@ export const DashboardPage: React.FC = () => {
           </div>
         </header>
 
-        {/* Central Dedicated Rounded Container (`rounded-2xl`) */}
-        <main className="flex-1 p-3 sm:p-5 md:p-6 overflow-hidden flex flex-col">
-          <div className="w-full h-full bg-white border border-slate-200/90 rounded-2xl shadow-xs flex flex-col overflow-hidden">
-            {/* ========================================================================= */}
-            {/* VIEW A: DASBOR (FORMULIR SURAT & SESI CHAT AI)                            */}
-            {/* ========================================================================= */}
-            {activeMainView === 'dashboard' && (
-              <>
+        {/* Central Workspace Area */}
+        <main className="flex-1 p-3 sm:p-5 md:p-6 overflow-y-auto space-y-6">
+          {/* ========================================================================= */}
+          {/* VIEW A: DASBOR (DUAL-CONTAINER: STUDIO & KONTEN UTAMA)                    */}
+          {/* ========================================================================= */}
+          {activeMainView === 'dashboard' && (
+            <div className="space-y-6">
+              {/* ===================================================================== */}
+              {/* KONTAINER 1: STUDIO WORKSPACE (FORMULIR SURAT & SESI CHAT AI)         */}
+              {/* Memiliki konfigurasi motion independen: motion-stagger-1              */}
+              {/* ===================================================================== */}
+              <div className="w-full bg-white border border-slate-200/90 rounded-2xl shadow-xs flex flex-col overflow-hidden motion-stagger-1">
                 {/* CONTAINER TOP BAR: SEGMENTED CONTROL */}
                 <div className="h-14 px-4 sm:px-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
                   {/* Segmented Control / Dual-Mode Switcher */}
@@ -496,7 +525,7 @@ export const DashboardPage: React.FC = () => {
                 <div className="flex-1 overflow-hidden relative flex flex-col">
                   {/* SUB-VIEW 1: FORMULIR SURAT WORKSPACE (DROPDOWN SELECTION) */}
                   {activeDashboardTab === 'form' && (
-                    <div className="flex-1 overflow-y-auto p-4 sm:p-7 space-y-6">
+                    <div key="form-pane" className="p-4 sm:p-7 space-y-6 motion-tab-pane">
                       {/* Form Header */}
                       <div className="border-b border-slate-100 pb-4">
                         <h1 className="text-base sm:text-lg font-semibold text-slate-900 tracking-tight">
@@ -797,61 +826,12 @@ export const DashboardPage: React.FC = () => {
                           </button>
                         </div>
                       </form>
-
-                      {/* Riwayat Permohonan Terkini */}
-                      {requests.length > 0 && (
-                        <div className="pt-8 border-t border-slate-200 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <h2 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">
-                              Riwayat Permohonan Terkini ({requests.length})
-                            </h2>
-                          </div>
-
-                          <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 bg-white">
-                            {requests.slice(0, 5).map((req) => (
-                              <div
-                                key={req.id}
-                                className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 hover:bg-slate-50/70 transition"
-                              >
-                                <div className="space-y-1">
-                                  <div className="flex items-center space-x-2">
-                                    <span className="text-[11px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-semibold">
-                                      {req.kode_surat}
-                                    </span>
-                                    <span className="text-xs font-semibold text-slate-900">
-                                      {req.nama_surat}
-                                    </span>
-                                  </div>
-                                  <div className="text-[11px] font-normal text-slate-400">
-                                    ID: #{req.id} • Dibuat:{' '}
-                                    {new Date(req.created_at).toLocaleDateString('id-ID', {
-                                      day: 'numeric',
-                                      month: 'short',
-                                      year: 'numeric',
-                                    })}
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center space-x-3 self-end sm:self-center">
-                                  <StatusBadge status={req.status} />
-                                  <Link
-                                    to={`/surat/${req.id}`}
-                                    className="px-2.5 py-1 text-xs font-normal text-slate-700 bg-slate-100 hover:bg-slate-200 rounded transition"
-                                  >
-                                    Lihat Detail
-                                  </Link>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
 
                   {/* SUB-VIEW 2: CHAT AI WORKSPACE (MODELED ON AGENTIC IDE) */}
                   {activeDashboardTab === 'chat' && (
-                    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50/40">
+                    <div key="chat-pane" className="flex flex-col h-[580px] sm:h-[620px] overflow-hidden bg-slate-50/40 motion-tab-pane">
                       {/* Chat Session Sub-Header */}
                       <div className="h-10 px-4 sm:px-6 border-b border-slate-200/80 bg-white flex items-center justify-between shrink-0 text-xs">
                         <div className="flex items-center space-x-2 truncate">
@@ -874,7 +854,7 @@ export const DashboardPage: React.FC = () => {
                       </div>
 
                       {/* Chat Message Stream */}
-                      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                      <div ref={chatMessagesContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
                         {chatMessages.map((msg) => {
                           const isUser = msg.sender === 'user';
                           const isSystem = msg.sender === 'system';
@@ -1048,8 +1028,6 @@ export const DashboardPage: React.FC = () => {
                             </button>
                           </div>
                         )}
-
-                        <div ref={chatEndRef} />
                       </div>
 
                       {/* DOCKED FLOATING PROMPT CAPSULE AT BOTTOM */}
@@ -1168,14 +1146,136 @@ export const DashboardPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-              </>
-            )}
+              </div>
 
-            {/* ========================================================================= */}
-            {/* VIEW B: VERIFIKASI KEASLIAN TTE (EMBEDDED INSIDE CENTRAL CONTAINER)       */}
-            {/* ========================================================================= */}
-            {activeMainView === 'verify' && (
-              <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6">
+              {/* ========================================================================= */}
+              {/* KONTAINER 2: KONTEN UTAMA (RIWAYAT & STATUS PERMOHONAN NASKAH DINAS)      */}
+              {/* Memiliki konfigurasi motion independen: motion-stagger-2                  */}
+              {/* ========================================================================= */}
+              <section
+                aria-label="Riwayat Permohonan Naskah Dinas"
+                className="w-full bg-white border border-slate-200/90 rounded-2xl shadow-xs p-5 sm:p-6 space-y-4 motion-stagger-2"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-100 gap-3">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-800 flex items-center justify-center shrink-0">
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h2 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">
+                          Riwayat Permohonan Naskah Dinas
+                        </h2>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                          {requests.length} Berkas
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-normal mt-0.5">
+                        Daftar berkas permohonan surat, status verifikasi berjenjang, dan tanda tangan elektronik (TTE).
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Quick Refresh Button */}
+                  <button
+                    onClick={fetchRequests}
+                    disabled={isLoadingRequests}
+                    className="self-start sm:self-auto px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-xs hover:bg-slate-50 transition-colors flex items-center space-x-1.5 ts-btn"
+                    title="Segarkan data riwayat"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRequests ? 'animate-spin' : ''}`} />
+                    <span>Segarkan</span>
+                  </button>
+                </div>
+
+                {/* Filter Status Pills */}
+                <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
+                  {(['ALL', 'PENDING', 'DONE'] as const).map((filterKey) => {
+                    const labels: Record<string, string> = {
+                      ALL: 'Semua Berkas',
+                      PENDING: 'Menunggu Persetujuan',
+                      DONE: 'Diterbitkan / Selesai',
+                    };
+                    const isActive = historyFilter === filterKey;
+                    return (
+                      <button
+                        key={filterKey}
+                        onClick={() => setHistoryFilter(filterKey)}
+                        className={`px-3 py-1 rounded-lg text-xs transition-all duration-150 whitespace-nowrap ${
+                          isActive
+                            ? 'bg-slate-900 text-white font-semibold shadow-2xs'
+                            : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900 font-normal'
+                        }`}
+                      >
+                        {labels[filterKey]}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Request Items List */}
+                {filteredRequests.length > 0 ? (
+                  <div className="border border-slate-200/90 rounded-xl overflow-hidden divide-y divide-slate-100 bg-white shadow-2xs">
+                    {filteredRequests.map((req) => (
+                      <div
+                        key={req.id}
+                        className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:bg-slate-50/80 transition-all duration-150 group"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold group-hover:bg-slate-900 group-hover:text-white transition-colors shrink-0">
+                              {req.kode_surat}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-900 truncate">
+                              {req.nama_surat}
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-normal text-slate-400 flex items-center space-x-2">
+                            <span>ID: #{req.id}</span>
+                            <span>•</span>
+                            <span>
+                              Dibuat: {new Date(req.created_at).toLocaleDateString('id-ID', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-3 self-end sm:self-center shrink-0">
+                          <StatusBadge status={req.status} />
+                          <Link
+                            to={`/surat/${req.id}`}
+                            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-900 hover:text-white rounded-lg transition-all duration-150 ts-btn"
+                          >
+                            Lihat Detail
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center border border-dashed border-slate-200 rounded-xl space-y-2">
+                    <FileText className="w-8 h-8 text-slate-300 mx-auto" />
+                    <div className="text-xs font-semibold text-slate-700">Tidak ada berkas permohonan surat</div>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                      {historyFilter === 'ALL'
+                        ? 'Silakan gunakan formulir surat di atas atau Sesi Chat AI untuk mengajukan permohonan naskah dinas baru.'
+                        : 'Tidak ada berkas dengan status filter yang dipilih.'}
+                    </p>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* VIEW B: VERIFIKASI KEASLIAN TTE (DEDICATED CONTAINER DENGAN MOTION PANE)  */}
+          {/* ========================================================================= */}
+          {activeMainView === 'verify' && (
+            <div className="motion-view-pane">
+              <section className="w-full bg-white border border-slate-200/90 rounded-2xl shadow-xs p-6 sm:p-8 space-y-6">
                 {/* Header */}
                 <div className="border-b border-slate-100 pb-4">
                   <div className="flex items-center space-x-2.5 mb-1.5">
@@ -1333,9 +1433,9 @@ export const DashboardPage: React.FC = () => {
                     )}
                   </div>
                 )}
-              </div>
-            )}
-          </div>
+              </section>
+            </div>
+          )}
         </main>
       </div>
     </div>
