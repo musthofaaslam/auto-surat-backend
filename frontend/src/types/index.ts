@@ -4,6 +4,8 @@
 
 export type UserRole = 'STUDENT' | 'LECTURER' | 'STAFF' | 'ADMIN';
 
+export type MainViewType = 'dashboard' | 'buat-surat' | 'verify';
+
 export type SuratStatusCode =
   | 'SUBMITTED'
   | 'REVISION_REQUIRED'

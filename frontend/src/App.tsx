@@ -21,6 +21,7 @@ const AppShell: React.FC = () => {
   const isAuthView =
     isAuthenticated &&
     (location.pathname === '/dashboard' ||
+      location.pathname === '/buat-surat' ||
       location.pathname.startsWith('/surat') ||
       location.pathname === '/approvals');
 
@@ -44,6 +45,7 @@ const AppShell: React.FC = () => {
             }
           >
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/buat-surat" element={<DashboardPage initialView="buat-surat" />} />
             <Route path="/surat/new" element={<SuratCreatePage />} />
             <Route path="/surat/:id" element={<SuratDetailPage />} />
             <Route

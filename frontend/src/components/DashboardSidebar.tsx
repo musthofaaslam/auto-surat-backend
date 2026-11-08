@@ -8,17 +8,20 @@ import {
   CheckSquare,
   LogOut,
   LayoutDashboard,
+  PlusCircle,
   User as UserIcon,
   X,
   Sparkles,
 } from 'lucide-react';
-import type { SuratType } from '../types';
+import type { SuratType, MainViewType } from '../types';
+
+export type { MainViewType };
 
 interface DashboardSidebarProps {
   isOpen: boolean;
   onClose: () => void;
-  activeMainView?: 'dashboard' | 'verify';
-  onSelectMainView?: (view: 'dashboard' | 'verify') => void;
+  activeMainView?: MainViewType;
+  onSelectMainView?: (view: MainViewType) => void;
   onSelectLetterInForm?: (kodeSurat: string) => void;
   suratTypes?: SuratType[];
   selectedKodeSurat?: string;
@@ -66,13 +69,24 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
     }
   };
 
-  const handleGoDasbor = () => {
+  const handleGoDashboard = () => {
     handleItemNavigation(() => {
       if (onSelectMainView) {
         onSelectMainView('dashboard');
       }
       if (location.pathname !== '/dashboard') {
         navigate('/dashboard?view=dashboard');
+      }
+    });
+  };
+
+  const handleGoBuatSurat = () => {
+    handleItemNavigation(() => {
+      if (onSelectMainView) {
+        onSelectMainView('buat-surat');
+      }
+      if (location.pathname !== '/dashboard') {
+        navigate('/dashboard?view=buat-surat');
       }
     });
   };
@@ -90,12 +104,13 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
 
   const handleGoLetter = (kodeSurat: string) => {
     handleItemNavigation(() => {
+      if (onSelectMainView) {
+        onSelectMainView('buat-surat');
+      }
       if (onSelectLetterInForm) {
         onSelectLetterInForm(kodeSurat);
       }
-      if (location.pathname !== '/dashboard') {
-        navigate(`/dashboard?surat=${kodeSurat}`);
-      }
+      navigate(`/dashboard?view=buat-surat&surat=${kodeSurat}`);
     });
   };
 
@@ -118,7 +133,12 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   ];
 
   const isDashboardActive =
-    location.pathname === '/dashboard' && (!activeMainView || activeMainView === 'dashboard');
+    ((location.pathname === '/dashboard' || location.pathname === '/') &&
+      (!activeMainView || activeMainView === 'dashboard')) &&
+    location.pathname !== '/buat-surat';
+  const isBuatSuratActive =
+    (location.pathname === '/dashboard' && activeMainView === 'buat-surat') ||
+    location.pathname === '/buat-surat';
   const isVerifyActive =
     (location.pathname === '/dashboard' && activeMainView === 'verify') ||
     location.pathname.startsWith('/verify');
@@ -184,13 +204,13 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             </div>
           )}
 
-          {/* Menu Dasbor */}
+          {/* Menu Dashboard */}
           <button
-            onClick={handleGoDasbor}
-            title={isCollapsed ? 'Dasbor' : undefined}
+            onClick={handleGoDashboard}
+            title={isCollapsed ? 'Dashboard' : undefined}
             className={`w-full flex items-center ${
               isCollapsed ? 'justify-center px-2' : 'justify-between px-3'
-            } py-2 rounded-lg text-xs transition-all duration-150 ${
+            } py-2 rounded-lg text-xs transition-all duration-150 cursor-pointer ${
               isDashboardActive
                 ? 'bg-slate-900 text-white font-semibold shadow-2xs'
                 : 'text-slate-700 hover:bg-slate-100/80 hover:text-slate-900 font-normal hover:translate-x-0.5'
@@ -198,7 +218,25 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
           >
             <div className="flex items-center space-x-2.5">
               <LayoutDashboard className="w-3.5 h-3.5 shrink-0" />
-              {!isCollapsed && <span>Dasbor</span>}
+              {!isCollapsed && <span>Dashboard</span>}
+            </div>
+          </button>
+
+          {/* Menu Buat Surat */}
+          <button
+            onClick={handleGoBuatSurat}
+            title={isCollapsed ? 'Buat Surat' : undefined}
+            className={`w-full flex items-center ${
+              isCollapsed ? 'justify-center px-2' : 'justify-between px-3'
+            } py-2 rounded-lg text-xs transition-all duration-150 cursor-pointer ${
+              isBuatSuratActive
+                ? 'bg-slate-900 text-white font-semibold shadow-2xs'
+                : 'text-slate-700 hover:bg-slate-100/80 hover:text-slate-900 font-normal hover:translate-x-0.5'
+            }`}
+          >
+            <div className="flex items-center space-x-2.5">
+              <PlusCircle className="w-3.5 h-3.5 shrink-0 text-blue-600" />
+              {!isCollapsed && <span>Buat Surat</span>}
             </div>
           </button>
 
@@ -208,7 +246,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             title={isCollapsed ? 'Verifikasi TTE' : undefined}
             className={`w-full flex items-center ${
               isCollapsed ? 'justify-center px-2' : 'justify-between px-3'
-            } py-2 rounded-lg text-xs transition-all duration-150 ${
+            } py-2 rounded-lg text-xs transition-all duration-150 cursor-pointer ${
               isVerifyActive
                 ? 'bg-slate-900 text-white font-semibold shadow-2xs'
                 : 'text-slate-700 hover:bg-slate-100/80 hover:text-slate-900 font-normal hover:translate-x-0.5'
@@ -263,14 +301,12 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
                   <div className="space-y-0.5">
                     {group.types.map((item) => {
                       const isSelected =
-                        location.pathname === '/dashboard' &&
-                        activeMainView === 'dashboard' &&
-                        selectedKodeSurat === item.kode_surat;
+                        isBuatSuratActive && selectedKodeSurat === item.kode_surat;
                       return (
                         <button
                           key={item.kode_surat}
                           onClick={() => handleGoLetter(item.kode_surat)}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs transition-all duration-150 flex items-center justify-between group ${
+                          className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs transition-all duration-150 flex items-center justify-between group cursor-pointer ${
                             isSelected
                               ? 'bg-slate-100 text-slate-900 font-semibold'
                               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-normal hover:translate-x-1'
@@ -319,7 +355,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             <button
               onClick={handleLogout}
               title="Keluar dari sesi"
-              className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+              className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
               aria-label="Keluar dari sesi"
             >
               <LogOut className="w-4 h-4" />

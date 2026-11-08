@@ -11,7 +11,7 @@ export const AuthenticatedLayout: React.FC = () => {
   const location = useLocation();
 
   // DashboardPage manages its own integrated studio container with DashboardSidebar
-  if (location.pathname === '/dashboard') {
+  if (location.pathname === '/dashboard' || location.pathname === '/buat-surat') {
     return <Outlet />;
   }
 
