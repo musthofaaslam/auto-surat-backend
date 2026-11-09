@@ -125,7 +125,7 @@ def _build_fallback_pdf_and_upload(context_data: Dict[str, Any]) -> str:
     semester_mhs = context_data.get("semester_aktif", "-")
     tahun_akademik = context_data.get("tahun_akademik", "-")
     isi_surat = context_data.get("final_approved_content") or context_data.get("isi_surat", "")
-    qr_url = context_data.get("qr_code_url", "")
+    qr_url = context_data.get("qr_verification_code") or context_data.get("qr_code_url", "")
     nama_surat = context_data.get("nama_surat") or "SURAT KETERANGAN RESMI"
     tanggal_surat = context_data.get("tanggal_surat", timezone.now().strftime("%d %B %Y"))
     kota_surat = (
@@ -434,6 +434,42 @@ class SuratExecutionTools:
                 original_exception=exc,
             ) from exc
 
+    @staticmethod
+    def resolve_template_path(surat_request: SuratRequest) -> str:
+        """
+        Menentukan path template HTML yang valid di disk dengan mekanisme fallback cerdas:
+        1. Mengambil konfigurasi template_path dari `surat_request.kode_surat.template_path`.
+        2. Membersihkan prefiks redundan seperti 'templates/'.
+        3. Memverifikasi keberadaan dan validitas template via django.template.loader.get_template.
+        4. Jika path kosong, template tidak ditemukan di disk, atau berukuran 0 byte,
+           mengembalikan template naskah dinas resmi terpusat 'kerangka-surat/base_surat.html'.
+        """
+        raw_path = getattr(getattr(surat_request, "kode_surat", None), "template_path", None)
+        candidate = str(raw_path).strip().replace("\\", "/") if raw_path else ""
+
+        # Bersihkan prefiks 'templates/' apabila tercantum di database
+        if candidate.startswith("templates/"):
+            candidate = candidate[len("templates/"):]
+        elif candidate.startswith("/templates/"):
+            candidate = candidate[len("/templates/"):]
+
+        if candidate:
+            try:
+                from django.template.loader import get_template
+
+                tmpl = get_template(candidate)
+                tmpl_origin = getattr(tmpl, "origin", None)
+                tmpl_filename = getattr(tmpl_origin, "name", None)
+                if tmpl_filename and os.path.exists(tmpl_filename) and os.path.getsize(tmpl_filename) > 0:
+                    return candidate
+            except (TemplateDoesNotExist, TemplateSyntaxError, Exception):
+                logger.warning(
+                    "Template khusus '%s' tidak ditemukan atau bermasalah. Menggunakan fallback 'kerangka-surat/base_surat.html'.",
+                    candidate,
+                )
+
+        return "kerangka-surat/base_surat.html"
+
     def build_pdf_template_context(
         self,
         surat_request: SuratRequest,
@@ -444,8 +480,8 @@ class SuratExecutionTools:
     ) -> Dict[str, Any]:
         """
         Menyusun context dictionary lengkap untuk proses rendering template HTML surat,
-        dengan pemetaan alias lengkap termasuk identitas Pejabat Penandatangan (`signer`)
-        dan kota instansi agar kompatibel dengan template apa pun maupun fallback PDF.
+        dengan pemetaan alias lengkap termasuk identitas Pejabat Penandatangan (`signer`),
+        daftar approvals, tanggal terbit, serta data URI QR code base64.
         """
         student = surat_request.student
         user_obj = getattr(student, "user", None)
@@ -509,6 +545,87 @@ class SuratExecutionTools:
             )
         )
 
+        # Buat QR code base64 PNG data-uri agar perender WeasyPrint dapat mencetak
+        # gambar QR tanpa bergantung pada koneksi jaringan atau URL eksternal
+        import base64
+        import io
+        import qrcode
+
+        qr_content_to_encode = qr_code_url or nomor_surat
+        qr_base64 = ""
+        try:
+            qr_img = qrcode.make(qr_content_to_encode)
+            buf = io.BytesIO()
+            qr_img.save(buf, format="PNG")
+            qr_base64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
+        except Exception as qr_err:
+            logger.warning("Gagal membuat QR base64 data-uri: %s", qr_err)
+            qr_base64 = qr_code_url
+
+        # Susun daftar riwayat persetujuan (approvals) untuk template yang mendukung multi-approver
+        surat_approvals_list = []
+        try:
+            from surat.models import SuratApproval
+
+            surat_approvals = list(
+                SuratApproval.objects.select_related("approver", "approver__user")
+                .filter(surat_request=surat_request)
+                .order_by("step_order")
+            )
+            total_steps = len(surat_approvals)
+            for index, app in enumerate(surat_approvals):
+                step_order = getattr(app, "step_order", index + 1)
+                app_status = getattr(app, "status", None)
+                lecturer_obj = getattr(app, "approver", None)
+                user_obj = getattr(lecturer_obj, "user", None) if lecturer_obj else None
+
+                approver_name = (
+                    getattr(user_obj, "nama", None)
+                    or getattr(lecturer_obj, "nama", None)
+                    or str(lecturer_obj or "")
+                )
+                approver_nip = (
+                    getattr(user_obj, "nip_nim", None)
+                    or getattr(lecturer_obj, "nip_nim", None)
+                    or getattr(lecturer_obj, "nip", None)
+                    or "-"
+                )
+
+                raw_step_jabatan = getattr(lecturer_obj, "jabatan_struktural", None)
+                if isinstance(raw_step_jabatan, (list, tuple)) and len(raw_step_jabatan) > 0:
+                    approver_role = str(raw_step_jabatan[0]).strip()
+                elif isinstance(raw_step_jabatan, str) and raw_step_jabatan.strip():
+                    approver_role = raw_step_jabatan.strip()
+                elif step_order == 1:
+                    approver_role = "Dosen Pembimbing"
+                else:
+                    approver_role = "Pimpinan Fakultas"
+
+                is_last = (index == total_steps - 1)
+                step_qr = qr_base64 if is_last else None
+
+                surat_approvals_list.append({
+                    "step_order": step_order,
+                    "approver_role": approver_role,
+                    "approver_name": approver_name,
+                    "approver_nip": approver_nip,
+                    "status": app_status,
+                    "qr_code_url": step_qr,
+                })
+        except Exception as app_exc:
+            logger.debug("Tidak dapat memuat relasi SuratApproval: %s", app_exc)
+            surat_approvals_list = []
+
+        if not surat_approvals_list:
+            surat_approvals_list.append({
+                "step_order": 1,
+                "approver_role": signer_jabatan or "Pimpinan Fakultas",
+                "approver_name": signer_nama or "Pejabat Berwenang",
+                "approver_nip": signer_nip or "-",
+                "status": "APPROVED",
+                "qr_code_url": qr_base64,
+            })
+
         return {
             "student": student,
             "nama_mahasiswa": getattr(user_obj, "nama", ""),
@@ -525,12 +642,15 @@ class SuratExecutionTools:
             "payload_data": payload,
             "nomor_surat": nomor_surat,
             "nomor_surat_resmi": nomor_surat,
-            "qr_code_url": qr_code_url,
+            "qr_code_url": qr_base64,
             "qr_verification_code": qr_code_url,
+            "qr_base64": qr_base64,
             "final_approved_content": resolved_content,
             "final_content": resolved_content,
             "ai_original_draft": surat_request.ai_original_draft or "",
             "isi_surat": resolved_content,
+            "approvals": surat_approvals_list,
+            "tanggal_terbit": timezone.now(),
             "tanggal_surat": timezone.now().strftime("%d %B %Y"),
             "kota_surat": kota_surat,
             "signer": effective_signer,
@@ -582,10 +702,7 @@ class SuratExecutionTools:
         (`{{ final_approved_content }}` / `{{ isi_surat }}`), otomatis menggunakan
         tata naskah dinas resmi terintegrasi agar konten draf AI selalu tercetak utuh.
         """
-        template_path = (
-            getattr(surat_request.kode_surat, "template_path", None)
-            or "surat/default_template.html"
-        )
+        template_path = self.resolve_template_path(surat_request)
         context_data = self.build_pdf_template_context(
             surat_request=surat_request,
             nomor_surat=nomor_surat,

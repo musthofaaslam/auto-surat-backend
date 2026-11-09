@@ -205,18 +205,19 @@ def _execute_final_issuance_worker(
     """
     Worker asinkron untuk penerbitan dokumen akhir surat secara non-blocking:
     1. Memanggil close_old_connections() di blok awal dan finally guna mencegah kebocoran koneksi DB.
-    2. Menghasilkan nomor surat resmi (generate_surat_number).
-    3. Membuat tanda tangan digital TTE SHA-256 dan token QR Code (create_tte_signature).
-    4. Mengompilasi naskah, merender WeasyPrint PDF, dan mengunggah berkas ke Cloudinary (render_and_upload_pdf).
-    5. Menyimpan nomor_surat_resmi, qr_verification_code, dan file_pdf_url ke SuratRequest.
-    6. Memperbarui status akhir surat menjadi SENT atau PRINTED.
-    7. Mencatat audit log penerbitan dokumen resmi (FIN_01).
-    8. Memicu pembelajaran memori gaya bahasa Fase 3 (AgenticMemoryAgent) dan
+    2. Mendelegasikan eksekusi penerbitan (Nomor Surat resmi sekuensial, TTE SHA-256 & QR Code,
+       render WeasyPrint PDF, dan pengunggahan Cloudinary) ke `SuratExecutionTools.execute_approval_pipeline`.
+    3. Menyimpan nomor_surat_resmi, qr_verification_code, file_pdf_url, dan memperbarui status
+       akhir surat menjadi SENT atau PRINTED secara atomik di dalam SuratExecutionTools.
+    4. Mencatat audit log penerbitan dokumen resmi (FIN_01).
+    5. Memicu pembelajaran memori gaya bahasa Fase 3 (AgenticMemoryAgent) dan
        distribusi dokumen ke Email / Telegram (_execute_distribution_worker).
     """
     close_old_connections()
     try:
         from ..models import Lecturer
+        from ..agents.execution_tools import SuratExecutionTools
+
         surat_req = SuratRequest.objects.select_related(
             'kode_surat',
             'student',
@@ -230,99 +231,26 @@ def _execute_final_issuance_worker(
 
         resolved_final_status = final_status if final_status in ("SENT", "PRINTED") else "SENT"
 
-        # 1. Kunci penomoran surat, final_approved_content, dan tanda tangan TTE di dalam transaksi DB singkat
-        with transaction.atomic():
-            nomor_resmi = generate_surat_number(surat_req.kode_surat, fakultas=surat_req.student.fakultas)
-            surat_req.nomor_surat_resmi = nomor_resmi
-            surat_req.kode_surat.template_path = "kerangka-surat/base_surat.html"
+        resolved_content = (
+            surat_req.final_approved_content 
+            or surat_req.ai_original_draft 
+            or ""
+        )
 
-            resolved_content = (
-                surat_req.final_approved_content 
-                or surat_req.ai_original_draft 
-                or ""
-            )
-            if not surat_req.final_approved_content and resolved_content:
-                surat_req.final_approved_content = resolved_content
-
-            tte_data = create_tte_signature(surat_req, signer=signer)
-            surat_req.qr_verification_code = tte_data['qr_code_url']
-            surat_req.save(
-                update_fields=[
-                    'nomor_surat_resmi',
-                    'final_approved_content',
-                    'qr_verification_code',
-                ]
-            )
-
-            surat_approvals = list(
-                SuratApproval.objects.select_related('approver', 'approver__user')
-                .filter(surat_request=surat_req)
-                .order_by('step_order')
-            )
-
-        # 2. Render PDF & unggah ke Cloudinary di luar transaction.atomic()
-        import qrcode, io, base64
-        qr_img = qrcode.make(tte_data.get('token', nomor_resmi))
-        buf = io.BytesIO()
-        qr_img.save(buf, format="PNG")
-        qr_base64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
-
-        surat_approvals_list = []
-        total_steps = len(surat_approvals)
-
-        for index, app in enumerate(surat_approvals):
-            step_order = getattr(app, 'step_order', None)
-            app_status = getattr(app, 'status', None)
-            
-            lecturer_obj = getattr(app, 'approver', None)
-            user_obj = getattr(lecturer_obj, 'user', None) if lecturer_obj else None
-            
-            approver_name = getattr(user_obj, 'nama', None) or getattr(lecturer_obj, 'nama', None) or str(lecturer_obj)
-            approver_nip = getattr(user_obj, 'nip_nim', None) or getattr(lecturer_obj, 'nip_nim', '-')
-            
-            if step_order == 1:
-                approver_role = "Dosen Pembimbing"
-            else:
-                approver_role = "Pimpinan Fakultas"
-
-            is_last = (index == total_steps - 1)
-            qr_url = qr_base64 if is_last else None
-
-            surat_approvals_list.append({
-                "step_order": step_order,
-                "approver_role": approver_role,
-                "approver_name": approver_name,
-                "approver_nip": approver_nip,
-                "status": app_status,
-                "qr_code_url": qr_url
-            })
-
-        context_data = {
-            "student": surat_req.student,
-            "payload": surat_req.payload_data,
-            "nomor_surat": nomor_resmi,
-            "nama_surat": surat_req.kode_surat.nama_surat,
-            "qr_code_url": qr_base64,
-            "final_content": resolved_content,
-            "approvals": surat_approvals_list,
-            "tanggal_terbit": timezone.now(),
-        }
-        pdf_url = render_and_upload_pdf(surat_req.kode_surat.template_path, context_data)
-        surat_req.file_pdf_url = pdf_url
-        surat_req.status = resolved_final_status
-        surat_req.save(update_fields=['file_pdf_url', 'status'])
-            
-        # 3. Catat Audit Log Final Penerbitan
-        SuratAuditLog.objects.create(
+        # Delegasikan seluruh pipeline penerbitan dokumen pasca-approval ke SuratExecutionTools
+        tools = SuratExecutionTools()
+        pipeline_result = tools.execute_approval_pipeline(
             surat_request=surat_req,
-            action_id="FIN_01",
-            action="FINAL_APPROVED_AND_ISSUED"
-        )
-        logger.info(
-            f"[ASYNC_ISSUANCE_SUCCESS] SuratRequest id={surat_req.id} berhasil diterbitkan (nomor: {nomor_resmi})."
+            signer=signer,
+            final_approved_content=resolved_content,
+            final_status=resolved_final_status,
         )
 
-        # 4. Pembelajaran Memori Gaya Bahasa Fase 3 & Distribusi Dokumen
+        logger.info(
+            f"[ASYNC_ISSUANCE_SUCCESS] SuratRequest id={surat_req.id} berhasil diterbitkan (nomor: {pipeline_result.nomor_surat_resmi})."
+        )
+
+        # Pembelajaran Memori Gaya Bahasa Fase 3 & Distribusi Dokumen
         _execute_distribution_worker(surat_req.id)
 
     except Exception as exc:

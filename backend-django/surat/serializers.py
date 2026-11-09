@@ -354,6 +354,8 @@ class SuratRequestDetailSerializer(serializers.ModelSerializer):
             'nama_surat',
             'nomor_surat_resmi',
             'status',
+            'chosen_destination',
+            'target_destination_address',
             'payload_data',
             'user_prompt_context',
             'ai_original_draft',
