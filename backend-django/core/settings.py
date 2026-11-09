@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -96,18 +97,32 @@ DATABASES = {
     )
 }
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/1")
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+IS_TESTING = "test" in sys.argv or "pytest" in sys.modules
 
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": REDIS_URL,
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            # Hapus CONNECTION_POOL_KWARGS yang error, cukup biarkan kosong atau atur timeout jika perlu
+# Konfigurasi Cache dengan Graceful Fallback:
+# Jika REDIS_URL tersedia dan bukan dalam pengujian unit, gunakan RedisCache (django-redis).
+# Jika REDIS_URL kosong / tidak disetel atau dalam pengujian, otomatis fallback ke LocMemCache.
+if REDIS_URL and not IS_TESTING:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": True,  # Mencegah crash unhandled jika server Redis offline
+                "SOCKET_CONNECT_TIMEOUT": 3,
+                "SOCKET_TIMEOUT": 3,
+            }
         }
     }
-}
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "autosurat-session-cache",
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {

@@ -1150,9 +1150,11 @@ class SuratDraftingAgent:
         kode_surat: str,
         required_fields: Optional[List[Dict[str, Any]]] = None,
         current_slots: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Any]] = None,
     ) -> Any:
         """
-        Mengekstrak nilai slot (field wajib) dari pesan obrolan bebas pengguna pada sesi chat.
+        Mengekstrak nilai slot (field wajib) dari pesan obrolan bebas pengguna pada sesi chat,
+        mendukung dokumen multimodal (PDF LoA, formulir, atau gambar lampiran) jika ada.
         Menggunakan Gemini Structured Outputs dengan skema dinamis per jenis surat, serta
         dilengkapi fallback deterministik jika koneksi LLM terkendala.
         Mengembalikan objek dengan atribut `extracted_slots` (Dict[str, Any]).
@@ -1167,9 +1169,11 @@ class SuratDraftingAgent:
         existing_slots = dict(current_slots) if isinstance(current_slots, dict) else {}
 
         if not user_prompt_context or not str(user_prompt_context).strip():
-            return SimpleNamespace(extracted_slots={})
-
-        text_clean = str(user_prompt_context).strip()
+            if not attachments:
+                return SimpleNamespace(extracted_slots={})
+            text_clean = "Silakan ekstrak seluruh field administrasi yang relevan dari dokumen lampiran pendukung."
+        else:
+            text_clean = str(user_prompt_context).strip()
 
         next_missing_field: Optional[Dict[str, Any]] = None
         for item in resolved_fields:
@@ -1197,24 +1201,35 @@ class SuratDraftingAgent:
                         f"petakan nilainya ke field '{next_missing_field.get('field')}'."
                     )
 
+                attachment_hint = ""
+                if attachments:
+                    attachment_hint = (
+                        "\nPengguna juga melampirkan berkas dokumen pendukung (seperti Surat Penerimaan/LoA, "
+                        "formulir, atau transkrip). Bacalah seluruh isi dokumen lampiran untuk mengekstrak data "
+                        "seperti nama instansi tujuan, alamat instansi, tanggal mulai, tanggal selesai, "
+                        "posisi yang dilamar, dan field terkait lainnya yang cocok dengan skema."
+                    )
+
                 extraction_prompt = (
-                    f"Ekstrak informasi faktual dari pesan mahasiswa berikut untuk permohonan surat '{kode_surat}'.\n"
+                    f"Ekstrak informasi faktual dari pesan mahasiswa dan dokumen lampiran (jika ada) berikut untuk permohonan surat '{kode_surat}'.\n"
                     f"Pesan Mahasiswa: \"{text_clean}\"\n"
                     f"Slot yang sudah terisi sebelumnya: {json.dumps(existing_slots, ensure_ascii=False)}"
-                    f"{target_hint}\n\n"
+                    f"{target_hint}"
+                    f"{attachment_hint}\n\n"
                     "ATURAN KETAT:\n"
-                    "1. Hanya isi field yang datanya benar-benar disebutkan di dalam Pesan Mahasiswa.\n"
-                    "2. Untuk field lain yang tidak disebutkan di dalam Pesan Mahasiswa ini, WAJIB bernilai null.\n"
+                    "1. Hanya isi field yang datanya benar-benar disebutkan di dalam Pesan Mahasiswa atau Dokumen Lampiran.\n"
+                    "2. Untuk field lain yang tidak disebutkan di dalam pesan maupun lampiran, WAJIB bernilai null.\n"
                     "3. Jangan mengarang atau menebak data yang tidak ada."
                 )
 
                 parsed_model = self._invoke_structured_llm(
                     system_prompt=(
-                        "Anda adalah asisten ekstraksi data administrasi akademik. "
-                        "Tugas Anda memetakan pesan mahasiswa ke dalam skema JSON secara akurat tanpa halusinasi."
+                        "Anda adalah asisten ekstraksi data administrasi akademik berkemampuan multimodal. "
+                        "Tugas Anda memetakan pesan mahasiswa dan dokumen lampiran ke dalam skema JSON secara akurat tanpa halusinasi."
                     ),
                     user_prompt=extraction_prompt,
                     response_schema=payload_schema_cls,
+                    attachments=attachments,
                 )
                 raw_dump = parsed_model.model_dump(mode="json")
                 for k, v in raw_dump.items():
@@ -1227,7 +1242,7 @@ class SuratDraftingAgent:
                     exc,
                 )
 
-        if not extracted and next_missing_field:
+        if not extracted and next_missing_field and not attachments:
             fk = str(next_missing_field["field"])
             extracted[fk] = text_clean
 

@@ -15,6 +15,7 @@ from accounts.authentication import CustomJWTAuthentication
 from accounts.models import Lecturer, Student
 from accounts.serializers import StandardErrorResponseSerializer
 
+from .agents.backend_bridge import persist_attachments_for_request
 from .agents.execution_tools import (
     ExecutionToolError,
     SuratExecutionTools,
@@ -391,16 +392,20 @@ class ChatSessionMessageAPIView(APIView):
     Endpoint untuk memproses pesan obrolan mahasiswa secara interaktif.
     Menggunakan AutoSuratSessionManager (Redis) + Chat Workflow Service 
     untuk Intent Detection (Lapis 1 & 2), State Locking, dan Accumulative Slot Filling.
-    POST /api/surat/chat/<uuid:thread_id>/message/
+    Mendukung input pesan teks maupun berkas lampiran multimodal.
+    POST /api/surat/chat/<str:thread_id>/
     """
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [CustomJWTAuthentication]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request, thread_id):
         user_msg = request.data.get("message", "").strip()
-        if not user_msg:
+        attachment_files = request.FILES.getlist('attachments')
+
+        if not user_msg and not attachment_files:
             return Response(
-                {"status": "error", "message": "Pesan tidak boleh kosong."},
+                {"status": "error", "message": "Pesan atau berkas lampiran tidak boleh kosong."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -412,12 +417,25 @@ class ChatSessionMessageAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        # Ekstrak berkas multimodal jika terdapat berkas lampiran
+        multimodal_parts = []
+        if attachment_files:
+            try:
+                multimodal_parts = persist_attachments_for_request(None, attachment_files)
+            except Exception as exc:
+                logger.warning("Gagal mengekstrak berkas lampiran multimodal: %s", exc)
+
+        if not user_msg and attachment_files:
+            file_names = ", ".join(getattr(f, "name", "berkas") for f in attachment_files)
+            user_msg = f"Berikut dokumen lampiran pendukung yang saya unggah: {file_names}"
+
         # 2. Jalankan AutoSuratSessionManager untuk menangani pesan masuk, 
         # pembatalan global (pilar 5), TTL Redis, dan pencatatan riwayat ke PostgreSQL (ChatMessage).
         reply_message = AutoSuratSessionManager.handle_incoming_message(
             thread_id=str(thread.id),
             user_message=user_msg,
-            user_obj=request.user
+            user_obj=request.user,
+            attachments=multimodal_parts or attachment_files,
         )
 
         # 3. Ambil kembali state terbaru dari Redis setelah diproses

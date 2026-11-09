@@ -114,10 +114,26 @@ export const suratService = {
     return response.data;
   },
 
-  async sendChatMessage(threadId: string, message: string): Promise<ChatSessionMessageResponse> {
-    const response = await api.post<ChatSessionMessageResponse>(`/surat/chat/${threadId}/`, {
-      message,
-    });
+  async sendChatMessage(
+    threadId: string,
+    message: string,
+    attachments?: File[]
+  ): Promise<ChatSessionMessageResponse> {
+    if (attachments && attachments.length > 0) {
+      const formData = new FormData();
+      formData.append('message', message);
+      attachments.forEach((file) => formData.append('attachments', file));
+      const response = await api.post<ChatSessionMessageResponse>(
+        `/surat/chat/${threadId}/`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+      return response.data;
+    }
+    const response = await api.post<ChatSessionMessageResponse>(
+      `/surat/chat/${threadId}/`,
+      { message }
+    );
     return response.data;
   },
 };

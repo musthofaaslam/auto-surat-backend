@@ -22,7 +22,12 @@ def get_effective_required_fields(surat_type) -> list:
         return []
 
 
-def handle_incoming_chat_with_redis(thread_id: str, user_message: str, session_data: dict) -> str:
+def handle_incoming_chat_with_redis(
+    thread_id: str, 
+    user_message: str, 
+    session_data: dict,
+    attachments: Optional[list] = None
+) -> str:
     """
     Menangani alur chat menggunakan state di Redis Cache 
     dan mensinkronikannya dengan model ChatThread di PostgreSQL.
@@ -60,8 +65,8 @@ def handle_incoming_chat_with_redis(thread_id: str, user_message: str, session_d
             thread_obj.title = f"Permohonan {surat_obj.nama_surat}"
             thread_obj.save(update_fields=['document_type', 'title', 'updated_at'])
         
-        # Langsung ekstrak apabila di kalimat pertama mahasiswa sudah menyebutkan sebagian parameter
-        slot_reply = process_slot_filling_redis(cleaned_msg, session_data, is_initial_turn=True)
+        # Langsung ekstrak apabila di kalimat pertama mahasiswa sudah menyebutkan sebagian parameter atau melampirkan berkas
+        slot_reply = process_slot_filling_redis(cleaned_msg, session_data, is_initial_turn=True, attachments=attachments)
         return (
             f"Baik, kita akan memproses **{surat_obj.nama_surat}** ({detected_kode_surat}).\n\n"
             f"{slot_reply}"
@@ -82,7 +87,7 @@ def handle_incoming_chat_with_redis(thread_id: str, user_message: str, session_d
         )
 
     # 5. KASUS C: Lanjutkan proses Slot Filling
-    return process_slot_filling_redis(cleaned_msg, session_data)
+    return process_slot_filling_redis(cleaned_msg, session_data, attachments=attachments)
 
 
 def handle_switch_confirmation_redis(user_message: str, thread_id: str, session_data: dict, thread_obj) -> str:
@@ -116,9 +121,14 @@ def handle_switch_confirmation_redis(user_message: str, thread_id: str, session_
         return f"Baik, peralihan dibatalkan. Kita tetap melanjutkan pengisian untuk **{active_surat_obj.nama_surat}**."
 
 
-def process_slot_filling_redis(user_message: str, session_data: dict, is_initial_turn: bool = False) -> str:
+def process_slot_filling_redis(
+    user_message: str, 
+    session_data: dict, 
+    is_initial_turn: bool = False,
+    attachments: Optional[list] = None
+) -> str:
     """
-    Mengelola slot filling secara fleksibel (mendukung input acak/terbalik)
+    Mengelola slot filling secara fleksibel (mendukung input acak/terbalik serta berkas lampiran)
     serta membersihkan slot menggunakan fungsi sanitizer.
     """
     try:
@@ -165,27 +175,28 @@ def process_slot_filling_redis(user_message: str, session_data: dict, is_initial
             f"telah lengkap dan siap dibuatkan draf surat!"
         )
 
-    # 1. GUNAKAN AI / EXTRACTOR UNTUK MENANGKAP SLOT DARI PESAN BEBAS USER
+    # 1. GUNAKAN AI / EXTRACTOR UNTUK MENANGKAP SLOT DARI PESAN BEBAS USER & BERKAS LAMPIRAN
     # Menggunakan SuratDraftingAgent atau fungsi helper ekstraksi slot berstandar LLM
     try:
         agent = SuratDraftingAgent()
-        # Meminta AI mengekstrak data apa saja yang relevan dari pesan bebas user saat ini
+        # Meminta AI mengekstrak data apa saja yang relevan dari pesan bebas user dan dokumen lampiran saat ini
         extraction_result = agent.extract_slots_from_text(
             user_prompt_context=user_message,
             kode_surat=surat_type.kode_surat,
             required_fields=required_fields,
             current_slots=None if is_initial_turn else current_slots,
+            attachments=attachments,
         )
         extracted_data = getattr(extraction_result, "extracted_slots", {}) or {}
         # Pada giliran pertama (saat user baru menyebutkan jenis surat saja seperti "Saya mau buat surat magang"),
         # cegah fallback darurat memasukkan kalimat pembuka ke dalam slot pertama jika bukan nilai faktual
-        if is_initial_turn and len(extracted_data) == 1:
+        if is_initial_turn and len(extracted_data) == 1 and not attachments:
             only_val = str(next(iter(extracted_data.values()))).strip()
             if only_val.lower() == user_message.strip().lower():
                 extracted_data = {}
     except Exception:
         extracted_data = {}
-        if not is_initial_turn:
+        if not is_initial_turn and not attachments:
             # Fallback darurat jika ekstraksi AI gagal pada giliran tanya-jawab slot
             for item in required_fields:
                 fk = item.get("field")

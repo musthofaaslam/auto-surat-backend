@@ -2,9 +2,19 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>Surat Pengantar Magang</title>
+    <title>Surat Rekomendasi Magang</title>
     <style>
-        body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.5; padding: 20px; color: #000; }
+        @page {
+            size: A4;
+            margin: 2.5cm 2cm 2.5cm 2cm;
+        }
+        body {
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            padding: 0;
+            color: #000;
+        }
         
         /* Style khusus untuk tabel kop surat */
         .header-table {
@@ -22,66 +32,99 @@
             text-align: left;
         }
         .logo-img {
-            width: 80px; /* Sesuaikan ukuran lebar logo */
+            width: 80px;
             height: auto;
         }
         .text-cell {
             width: 85%;
             text-align: center;
         }
-        .text-cell h3, .text-cell h4, .text-cell p {
+        .text-cell h2, .text-cell h3, .text-cell h4, .text-cell p {
             margin: 2px 0;
         }
 
-        .content { margin-top: 20px; text-align: justify; }
-        .signature { margin-top: 50px; float: right; text-align: center; width: 250px; }
+        .content {
+            margin-top: 20px;
+            text-align: justify;
+            line-height: 1.6;
+        }
+        .content p {
+            margin-bottom: 12px;
+            text-indent: 36px;
+            line-height: 1.6;
+        }
+        .content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+
+        .signature {
+            margin-top: 40px;
+            float: right;
+            text-align: center;
+            width: 260px;
+            page-break-inside: avoid;
+        }
+        .signature p {
+            margin: 3px 0;
+        }
+        .qr-code-box {
+            margin: 8px auto;
+            height: 80px;
+        }
+        .qr-code-img {
+            width: 75px;
+            height: 75px;
+            object-fit: contain;
+        }
+        .clear {
+            clear: both;
+        }
     </style>
 </head>
 <body>
 
-    <!-- KOP SURAT DENGAN LOGO DI SAMPING -->
+    <!-- KOP SURAT STANDAR RESMI -->
     <table class="header-table">
         <tr>
+            {% if logo_url or logo_data_uri %}
             <td class="logo-cell">
-                <!-- Gunakan path relatif statis Django atau URL gambar -->
-                <img src="{{ ../univ_logos.png }}" alt="Logo Universitas" class="logo-img">
+                <img src="{{ logo_url|default:logo_data_uri }}" alt="Logo Universitas" class="logo-img">
             </td>
-            <td class="text-cell">
-                <h3>KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI</h3>
-                <h3>UNIVERSITAS CONTOH INDONESIA</h3>
-                <h4>FAKULTAS ILMU KOMPUTER</h4>
-                <p style="font-size: 10pt; font-style: italic;">Jalan Telekomunikasi No. 1, Bandung | Email: info@contoh.ac.id</p>
+            {% endif %}
+            <td class="text-cell" {% if not logo_url and not logo_data_uri %}style="width: 100%; text-align: center;"{% endif %}>
+                <h3 style="font-size: 11pt; margin: 2px 0;">KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI</h3>
+                <h2 style="font-size: 14pt; margin: 2px 0;">UNIVERSITAS INDONESIA EMAS</h2>
+                <h4 style="font-size: 12pt; margin: 2px 0;">{{ student.fakultas.nama_fakultas|default:"FAKULTAS ILMU KOMPUTER"|upper }}</h4>
+                <p style="font-size: 9.5pt; font-style: italic; margin: 2px 0;">Jl. Kampus Utama No. 1, {{ kota_surat|default:"Semarang" }} | Email: info@uie.ac.id</p>
             </td>
         </tr>
     </table>
 
     <div style="text-align: center; margin: 20px 0;">
-        <h4 style="margin: 0; text-decoration: underline;">SURAT KETERANGAN AKTIF KULIAH</h4>
+        <h4 style="margin: 0; text-decoration: underline; font-weight: bold; text-transform: uppercase;">SURAT REKOMENDASI MAGANG</h4>
         <p style="margin: 5px 0;">Nomor: {{ nomor_surat }}</p>
     </div>
 
     <div class="content">
-        <p>Yang bertanda tangan di bawah ini pimpinan Fakultas Ilmu Komputer Universitas Contoh Indonesia, menerangkan bahwa:</p>
-        
-        <div class="student-info">
-            <table>
-                <tr><td style="width: 140px;">Nama</td><td>: <b>{{ nama_mahasiswa }}</b></td></tr>
-                <tr><td>NIM</td><td>: {{ nim }}</td></tr>
-                <tr><td>Program Studi</td><td>: {{ program_studi }}</td></tr>
-                <tr><td>Semester</td><td>: {{ semester_aktif }}</td></tr>
-            </table>
-        </div>
-
-        <p>Adalah benar mahasiswa aktif yang terdaftar pada semester {{ semester_aktif }} tahun akademik {{ tahun_akademik }}. Surat keterangan ini diberikan untuk keperluan: <b>{{ payload_data.keperluan }}</b>.</p>
-        
-        <p>Demikian surat keterangan ini dibuat dengan sebenarnya untuk dapat dipergunakan sebagaimana mestinya.</p>
+        {{ final_approved_content|default:final_content|default:isi_surat|safe }}
     </div>
 
     <div class="signature">
-        <p>Bandung, {{ tanggal_surat }}</p>
-        <p>Dekan / Wakil Dekan,</p>
-        <br><br><br>
-        <p><b>Dr. Pejabat Kampus, M.T.</b></p>
+        <p>{{ kota_surat|default:"Semarang" }}, {{ tanggal_surat }}</p>
+        <p>{{ jabatan_penandatangan|default:"Dekan / Wakil Dekan" }}</p>
+        <div class="qr-code-box">
+            {% if qr_code_url %}
+                <img src="{{ qr_code_url }}" alt="QR Code TTE" class="qr-code-img">
+            {% else %}
+                <div style="height: 75px;"></div>
+            {% endif %}
+        </div>
+        <p><b><u>{{ nama_penandatangan|default:"Pejabat Berwenang" }}</u></b></p>
+        <p>NIP. {{ nip_penandatangan|default:"-" }}</p>
     </div>
+    <div class="clear"></div>
+
 </body>
 </html>
