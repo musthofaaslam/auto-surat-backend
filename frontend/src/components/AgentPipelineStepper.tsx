@@ -28,11 +28,10 @@ export const AgentPipelineStepper: React.FC<AgentPipelineStepperProps> = ({
   const isStage3Active = status === 'PENDING_APPROVAL' || status === 'IN_REVIEW';
   const isStage3Passed =
     status === 'APPROVED' ||
-    status === 'PROCESSED' ||
     status === 'SENT' ||
     status === 'PRINTED';
 
-  const isStage4Active = status === 'PROCESSED';
+  const isStage4Active = status === 'APPROVED';
   const isStage4Complete = status === 'SENT' || status === 'PRINTED';
 
   const isRejected = status === 'REJECTED';

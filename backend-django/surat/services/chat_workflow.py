@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from surat.models import SuratType, ChatThread
 from .detect_intent import detect_intent_dynamically
 from .route_intent import route_intent_with_ai

@@ -66,13 +66,17 @@ export const SuratDetailPage: React.FC = () => {
   // Real-time polling for asynchronous workers
   useEffect(() => {
     if (!detail) return;
-    if (detail.status === 'SUBMITTED' || detail.status === 'PROCESSED') {
+    if (
+      detail.status === 'SUBMITTED' ||
+      detail.status === 'IN_REVIEW' ||
+      (detail.status === 'APPROVED' && !detail.file_pdf_url)
+    ) {
       const timer = setInterval(() => {
         fetchDetail();
       }, 3500);
       return () => clearInterval(timer);
     }
-  }, [detail?.status]);
+  }, [detail?.status, detail?.file_pdf_url]);
 
   const handleRedraftSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,7 +208,7 @@ export const SuratDetailPage: React.FC = () => {
         nomorSurat={detail.nomor_surat_resmi}
       />
 
-      {/* 3. ASYNCHRONOUS NOTIFICATION (SUBMITTED / PROCESSED) */}
+      {/* 3. ASYNCHRONOUS NOTIFICATION (SUBMITTED / APPROVED ISSUANCE) */}
       {detail.status === 'SUBMITTED' && (
         <div className="ts-card p-5 bg-blue-50/70 border-blue-200 flex items-start space-x-3.5 text-blue-950">
           <Clock className="w-5 h-5 shrink-0 text-blue-600 animate-spin mt-0.5" />
@@ -213,6 +217,19 @@ export const SuratDetailPage: React.FC = () => {
             <p className="text-xs text-blue-800 leading-relaxed">
               Model Gemini 3.1 Flash sedang menjalankan inferensi ekstraksi slot, validasi aturan akademik,
               dan loop refleksi mandiri di latar belakang. Halaman ini akan diperbarui secara otomatis.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {detail.status === 'APPROVED' && !detail.file_pdf_url && (
+        <div className="ts-card p-5 bg-purple-50/70 border-purple-200 flex items-start space-x-3.5 text-purple-950">
+          <Clock className="w-5 h-5 shrink-0 text-purple-600 animate-spin mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="font-bold text-sm">Penerbitan Dokumen Resmi & TTE Sedang Berjalan</h4>
+            <p className="text-xs text-purple-800 leading-relaxed">
+              Persetujuan telah dikonfirmasi. Sistem sedang menerbitkan nomor surat resmi sekuensial,
+              menghitung tanda tangan elektronik (TTE), merender dokumen PDF, dan mengunggah ke Cloudinary.
             </p>
           </div>
         </div>

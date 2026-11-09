@@ -13,21 +13,21 @@ export type SuratStatusCode =
   | 'IN_REVIEW'
   | 'APPROVED'
   | 'REJECTED'
-  | 'PROCESSED'
   | 'SENT'
   | 'PRINTED'
   | 'FAILED';
 
 export interface User {
-  id: number;
+  id: string;
   nama: string;
   nip_nim: string;
   role: UserRole;
+  email?: string;
   profile?: {
     nim?: string;
     prodi?: string;
     fakultas?: string;
-    user_id?: number;
+    user_id?: string;
   };
 }
 
@@ -44,6 +44,7 @@ export interface SuratType {
   kategori: string;
   is_auto_approval: boolean;
   template_path?: string;
+  required_payload_fields?: DynamicFieldDef[];
 }
 
 export interface DynamicFieldDef {
@@ -73,7 +74,7 @@ export interface TteSignature {
 export interface SuratApproval {
   id: number;
   step_order: number;
-  approver: number;
+  approver: string;
   approver_name: string | null;
   approver_nip: string | null;
   status: 'WAITING' | 'PENDING' | 'APPROVED' | 'REJECTED';

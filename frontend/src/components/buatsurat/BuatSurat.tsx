@@ -255,7 +255,11 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
   const currentSelectedSuratObj = suratTypes.find((s) => s.kode_surat === selectedKodeSurat);
 
   const activeRequiredFields: DynamicFieldDef[] =
-    REQUIRED_FIELDS_BY_KODE[selectedKodeSurat] || DEFAULT_REQUIRED_FIELDS;
+    currentSelectedSuratObj?.required_payload_fields && currentSelectedSuratObj.required_payload_fields.length > 0
+      ? currentSelectedSuratObj.required_payload_fields
+      : selectedKodeSurat
+      ? REQUIRED_FIELDS_BY_KODE[selectedKodeSurat] || DEFAULT_REQUIRED_FIELDS
+      : DEFAULT_REQUIRED_FIELDS;
 
   const handleFormFieldChange = (field: string, value: string) => {
     setFormPayloadData((prev) => ({

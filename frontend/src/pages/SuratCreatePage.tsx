@@ -64,9 +64,13 @@ export const SuratCreatePage: React.FC = () => {
     loadTypes();
   }, []);
 
-  const activeFields: DynamicFieldDef[] = selectedKodeSurat
-    ? REQUIRED_FIELDS_BY_KODE[selectedKodeSurat] || DEFAULT_REQUIRED_FIELDS
-    : DEFAULT_REQUIRED_FIELDS;
+  const selectedTypeObj = suratTypes.find((t) => t.kode_surat === selectedKodeSurat);
+  const activeFields: DynamicFieldDef[] =
+    selectedTypeObj?.required_payload_fields && selectedTypeObj.required_payload_fields.length > 0
+      ? selectedTypeObj.required_payload_fields
+      : selectedKodeSurat
+      ? REQUIRED_FIELDS_BY_KODE[selectedKodeSurat] || DEFAULT_REQUIRED_FIELDS
+      : DEFAULT_REQUIRED_FIELDS;
 
   const handleFieldChange = (fieldName: string, value: any) => {
     setPayloadData((prev) => ({

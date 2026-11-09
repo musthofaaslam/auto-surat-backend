@@ -243,9 +243,22 @@ class SuratRejectActionSerializer(serializers.Serializer):
 
 class SuratTypeSerializer(serializers.ModelSerializer):
     """Serializer output untuk master data jenis surat (misal untuk pilihan dropdown frontend)"""
+    required_payload_fields = serializers.SerializerMethodField()
+
     class Meta:
         model = SuratType
-        fields = ['kode_surat', 'nama_surat', 'kategori', 'is_auto_approval', 'template_path']
+        fields = [
+            'kode_surat',
+            'nama_surat',
+            'kategori',
+            'is_auto_approval',
+            'template_path',
+            'required_payload_fields',
+        ]
+
+    def get_required_payload_fields(self, obj):
+        from .services.chat_workflow import get_effective_required_fields
+        return get_effective_required_fields(obj)
 
 
 class SuratAttachmentSerializer(serializers.ModelSerializer):

@@ -82,17 +82,6 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
           <span>DITOLAK</span>
         </span>
       );
-    case 'PROCESSED':
-      return (
-        <span
-          className={`inline-flex items-center font-medium rounded-md bg-purple-50 text-purple-800 border border-purple-300 ${sizeClasses}`}
-        >
-          {showDot && (
-            <span className="w-1.5 h-1.5 rounded-full bg-purple-600 mr-1.5 animate-pulse shrink-0"></span>
-          )}
-          <span>DIPROSES (TTE)</span>
-        </span>
-      );
     case 'SENT':
       return (
         <span
