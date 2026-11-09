@@ -894,6 +894,7 @@ class LecturerApprovalActionAPIView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [CustomJWTAuthentication]
+    _last_worker_thread: Optional[threading.Thread] = None
 
     @extend_schema(
         summary="Tindakan Persetujuan atau Penolakan Surat (Dosen/Pejabat)",
@@ -958,6 +959,11 @@ class LecturerApprovalActionAPIView(APIView):
             catatan=catatan,
             final_approved_content=final_approved_content,
             final_status=final_status,
+        )
+
+        from .services import workflow_service
+        LecturerApprovalActionAPIView._last_worker_thread = getattr(
+            workflow_service, "_last_issuance_worker_thread", None
         )
 
         return Response(result_data, status=http_code)

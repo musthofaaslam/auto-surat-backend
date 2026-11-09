@@ -15,6 +15,8 @@ from django.db import close_old_connections
 
 logger = getLogger(__name__)
 
+_last_issuance_worker_thread = None
+
 def process_surat_request(student, surat_type, payload_data, attachments_files=None):
     """
     Router utama untuk mengarahkan pengajuan ke jalur Auto atau Manual.
@@ -108,116 +110,51 @@ def process_approval_action(
             )
             return {"message": "Persetujuan tahap ini berhasil. Surat diteruskan ke pejabat selanjutnya."}, 200
         else:
-            # Jika ini step terakhir, terbitkan surat resmi secara penuh!
+            # Jika ini step terakhir, perbarui status menjadi APPROVED dan delegasikan penerbitan dokumen ke worker asinkron
             resolved_final_status = final_status if final_status in ("SENT", "PRINTED") else "SENT"
-            
-            try:
-                # 1. Kunci penomoran surat, final_approved_content, dan tanda tangan kriptografis TTE di dalam transaksi singkat
-                with transaction.atomic():
-                    nomor_resmi = generate_surat_number(surat_req.kode_surat, fakultas=surat_req.student.fakultas)
-                    surat_req.nomor_surat_resmi = nomor_resmi
-                    surat_req.kode_surat.template_path = "kerangka-surat/base_surat.html"
 
-                    resolved_content = (
-                        surat_req.final_approved_content 
-                        or surat_req.ai_original_draft 
-                        or ""
-                    )
-                    if not surat_req.final_approved_content and resolved_content:
-                        surat_req.final_approved_content = resolved_content
+            # 1. Kunci naskah persetujuan dan ubah status SuratRequest menjadi APPROVED secara sinkron
+            resolved_content = (
+                surat_req.final_approved_content 
+                or surat_req.ai_original_draft 
+                or ""
+            )
+            if not surat_req.final_approved_content and resolved_content:
+                surat_req.final_approved_content = resolved_content
 
-                    tte_data = create_tte_signature(surat_req, signer=lecturer)
-                    surat_req.qr_verification_code = tte_data['qr_code_url']
-                    surat_req.status = 'APPROVED'
-                    surat_req.save(
-                        update_fields=[
-                            'nomor_surat_resmi',
-                            'final_approved_content',
-                            'qr_verification_code',
-                            'status',
-                        ]
-                    )
+            surat_req.status = 'APPROVED'
+            update_req_fields = ['status']
+            if isinstance(final_approved_content, str) and final_approved_content.strip():
+                update_req_fields.append('final_approved_content')
+            surat_req.save(update_fields=update_req_fields)
 
-                    surat_approvals = list(
-                        SuratApproval.objects.select_related('approver', 'approver__user')
-                        .filter(surat_request=surat_req)
-                        .order_by('step_order')
-                    )
+            SuratAuditLog.objects.create(
+                surat_request=surat_req,
+                action_id=f"APP_0{approval_step.step_order}",
+                action=f"FINAL_APPROVAL_CONFIRMED_BY_{lecturer.id}"
+            )
 
-                # 2. Render PDF & unggah ke Cloudinary di luar transaction.atomic() agar tidak mengunci koneksi DB
-                import qrcode, io, base64
-                qr_img = qrcode.make(tte_data.get('token', nomor_resmi))
-                buf = io.BytesIO()
-                qr_img.save(buf, format="PNG")
-                qr_base64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
+            # 2. Luncurkan worker thread asinkron untuk penerbitan dokumen resmi (Non-blocking I/O)
+            global _last_issuance_worker_thread
+            issuance_thread = threading.Thread(
+                target=_execute_final_issuance_worker,
+                kwargs={
+                    "surat_request_id": surat_req.id,
+                    "signer_lecturer_id": lecturer.id,
+                    "final_status": resolved_final_status,
+                },
+                name=f"async-issuance-{surat_req.id}",
+                daemon=True,
+            )
+            _last_issuance_worker_thread = issuance_thread
+            issuance_thread.start()
 
-                surat_approvals_list = []
-                total_steps = len(surat_approvals)
-
-                for index, app in enumerate(surat_approvals):
-                    step_order = getattr(app, 'step_order', None)
-                    app_status = getattr(app, 'status', None)
-                    
-                    lecturer_obj = getattr(app, 'approver', None)
-                    user_obj = getattr(lecturer_obj, 'user', None) if lecturer_obj else None
-                    
-                    approver_name = getattr(user_obj, 'nama', None) or getattr(lecturer_obj, 'nama', None) or str(lecturer_obj)
-                    approver_nip = getattr(user_obj, 'nip_nim', None) or getattr(lecturer_obj, 'nip_nim', '-')
-                    
-                    if step_order == 1:
-                        approver_role = "Dosen Pembimbing"
-                    else:
-                        approver_role = "Pimpinan Fakultas"
-
-                    is_last = (index == total_steps - 1)
-                    qr_url = qr_base64 if is_last else None
-
-                    surat_approvals_list.append({
-                        "step_order": step_order,
-                        "approver_role": approver_role,
-                        "approver_name": approver_name,
-                        "approver_nip": approver_nip,
-                        "status": app_status,
-                        "qr_code_url": qr_url
-                    })
-
-                context_data = {
-                    "student": surat_req.student,
-                    "payload": surat_req.payload_data,
-                    "nomor_surat": nomor_resmi,
-                    "nama_surat": surat_req.kode_surat.nama_surat,
-                    "qr_code_url": qr_base64,
-                    "final_content": resolved_content,
-                    "approvals": surat_approvals_list,
-                    "tanggal_terbit": timezone.now(),
-                }
-                pdf_url = render_and_upload_pdf(surat_req.kode_surat.template_path, context_data)
-                surat_req.file_pdf_url = pdf_url
-                surat_req.status = resolved_final_status
-                surat_req.save(update_fields=['file_pdf_url', 'status'])
-                    
-                # 3. Catat Audit Log Final
-                SuratAuditLog.objects.create(
-                    surat_request=surat_req,
-                    action_id="FIN_01",
-                    action="FINAL_APPROVED_AND_ISSUED"
-                )
-
-                dist_thread = threading.Thread(
-                    target=_execute_distribution_worker,
-                    args=(surat_req.id,),
-                    name=f"async-dist-{surat_req.id}",
-                    daemon=True
-                )
-                dist_thread.start()
-
-            except Exception as e:
-                return {"error": f"Gagal menerbitkan dokumen resmi: {str(e)}"}, 500
-
+            # 3. Segera kembalikan respons HTTP 200 ke klien dalam waktu kurang dari 500 ms (< 50 ms)
             return {
-                "message": "Persetujuan final selesai. Surat resmi berhasil diterbitkan dan dikirim ke tujuan!",
-                "nomor_surat_resmi": nomor_resmi,
-                "file_pdf_url": surat_req.file_pdf_url
+                "message": "Persetujuan final berhasil dikonfirmasi. Surat resmi sedang diterbitkan dan dikirim di latar belakang.",
+                "status": "APPROVED",
+                "nomor_surat_resmi": None,
+                "file_pdf_url": None,
             }, 200
 
     return {"error": "Aksi tidak valid."}, 400
@@ -258,7 +195,153 @@ def route_and_distribute_document(surat_request):
         )
     else:
         logger.warning(f"Destinasi pengiriman tidak dikenal atau kosong untuk SuratRequest id={surat_request.id}")
-        
+
+
+def _execute_final_issuance_worker(
+    surat_request_id: int,
+    signer_lecturer_id: int = None,
+    final_status: str = "SENT",
+):
+    """
+    Worker asinkron untuk penerbitan dokumen akhir surat secara non-blocking:
+    1. Memanggil close_old_connections() di blok awal dan finally guna mencegah kebocoran koneksi DB.
+    2. Menghasilkan nomor surat resmi (generate_surat_number).
+    3. Membuat tanda tangan digital TTE SHA-256 dan token QR Code (create_tte_signature).
+    4. Mengompilasi naskah, merender WeasyPrint PDF, dan mengunggah berkas ke Cloudinary (render_and_upload_pdf).
+    5. Menyimpan nomor_surat_resmi, qr_verification_code, dan file_pdf_url ke SuratRequest.
+    6. Memperbarui status akhir surat menjadi SENT atau PRINTED.
+    7. Mencatat audit log penerbitan dokumen resmi (FIN_01).
+    8. Memicu pembelajaran memori gaya bahasa Fase 3 (AgenticMemoryAgent) dan
+       distribusi dokumen ke Email / Telegram (_execute_distribution_worker).
+    """
+    close_old_connections()
+    try:
+        from ..models import Lecturer
+        surat_req = SuratRequest.objects.select_related(
+            'kode_surat',
+            'student',
+            'student__fakultas',
+            'student__prodi',
+        ).get(pk=surat_request_id)
+
+        signer = None
+        if signer_lecturer_id:
+            signer = Lecturer.objects.filter(pk=signer_lecturer_id).first()
+
+        resolved_final_status = final_status if final_status in ("SENT", "PRINTED") else "SENT"
+
+        # 1. Kunci penomoran surat, final_approved_content, dan tanda tangan TTE di dalam transaksi DB singkat
+        with transaction.atomic():
+            nomor_resmi = generate_surat_number(surat_req.kode_surat, fakultas=surat_req.student.fakultas)
+            surat_req.nomor_surat_resmi = nomor_resmi
+            surat_req.kode_surat.template_path = "kerangka-surat/base_surat.html"
+
+            resolved_content = (
+                surat_req.final_approved_content 
+                or surat_req.ai_original_draft 
+                or ""
+            )
+            if not surat_req.final_approved_content and resolved_content:
+                surat_req.final_approved_content = resolved_content
+
+            tte_data = create_tte_signature(surat_req, signer=signer)
+            surat_req.qr_verification_code = tte_data['qr_code_url']
+            surat_req.save(
+                update_fields=[
+                    'nomor_surat_resmi',
+                    'final_approved_content',
+                    'qr_verification_code',
+                ]
+            )
+
+            surat_approvals = list(
+                SuratApproval.objects.select_related('approver', 'approver__user')
+                .filter(surat_request=surat_req)
+                .order_by('step_order')
+            )
+
+        # 2. Render PDF & unggah ke Cloudinary di luar transaction.atomic()
+        import qrcode, io, base64
+        qr_img = qrcode.make(tte_data.get('token', nomor_resmi))
+        buf = io.BytesIO()
+        qr_img.save(buf, format="PNG")
+        qr_base64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
+
+        surat_approvals_list = []
+        total_steps = len(surat_approvals)
+
+        for index, app in enumerate(surat_approvals):
+            step_order = getattr(app, 'step_order', None)
+            app_status = getattr(app, 'status', None)
+            
+            lecturer_obj = getattr(app, 'approver', None)
+            user_obj = getattr(lecturer_obj, 'user', None) if lecturer_obj else None
+            
+            approver_name = getattr(user_obj, 'nama', None) or getattr(lecturer_obj, 'nama', None) or str(lecturer_obj)
+            approver_nip = getattr(user_obj, 'nip_nim', None) or getattr(lecturer_obj, 'nip_nim', '-')
+            
+            if step_order == 1:
+                approver_role = "Dosen Pembimbing"
+            else:
+                approver_role = "Pimpinan Fakultas"
+
+            is_last = (index == total_steps - 1)
+            qr_url = qr_base64 if is_last else None
+
+            surat_approvals_list.append({
+                "step_order": step_order,
+                "approver_role": approver_role,
+                "approver_name": approver_name,
+                "approver_nip": approver_nip,
+                "status": app_status,
+                "qr_code_url": qr_url
+            })
+
+        context_data = {
+            "student": surat_req.student,
+            "payload": surat_req.payload_data,
+            "nomor_surat": nomor_resmi,
+            "nama_surat": surat_req.kode_surat.nama_surat,
+            "qr_code_url": qr_base64,
+            "final_content": resolved_content,
+            "approvals": surat_approvals_list,
+            "tanggal_terbit": timezone.now(),
+        }
+        pdf_url = render_and_upload_pdf(surat_req.kode_surat.template_path, context_data)
+        surat_req.file_pdf_url = pdf_url
+        surat_req.status = resolved_final_status
+        surat_req.save(update_fields=['file_pdf_url', 'status'])
+            
+        # 3. Catat Audit Log Final Penerbitan
+        SuratAuditLog.objects.create(
+            surat_request=surat_req,
+            action_id="FIN_01",
+            action="FINAL_APPROVED_AND_ISSUED"
+        )
+        logger.info(
+            f"[ASYNC_ISSUANCE_SUCCESS] SuratRequest id={surat_req.id} berhasil diterbitkan (nomor: {nomor_resmi})."
+        )
+
+        # 4. Pembelajaran Memori Gaya Bahasa Fase 3 & Distribusi Dokumen
+        _execute_distribution_worker(surat_req.id)
+
+    except Exception as exc:
+        logger.exception(f"[ASYNC_ISSUANCE_ERROR] Gagal menerbitkan dokumen resmi di latar belakang id={surat_request_id}: {exc}")
+        try:
+            surat_req = SuratRequest.objects.get(pk=surat_request_id)
+            surat_req.status = "FAILED"
+            surat_req.save(update_fields=["status"])
+            SuratAuditLog.objects.create(
+                surat_request=surat_req,
+                action_id="FIN_ERR",
+                action=f"ASYNC_ISSUANCE_FAILED: {str(exc)}"[:255]
+            )
+        except Exception:
+            pass
+    finally:
+        close_old_connections()
+
+
 def _execute_distribution_worker(surat_request_id: int):
     """
     Worker asinkron untuk menjalankan:

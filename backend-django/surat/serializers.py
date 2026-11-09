@@ -79,9 +79,27 @@ class SuratRequestCreateSerializer(serializers.Serializer):
                 self.initial_data.get('context'),
             ])
 
+        if (raw_payload is None or raw_payload == {}) and hasattr(self, 'initial_data') and isinstance(self.initial_data, dict):
+            init_payload = self.initial_data.get('payload_data')
+            if init_payload:
+                raw_payload = init_payload
+
         if isinstance(raw_payload, str) and raw_payload.strip():
-            prompt_candidates.append(raw_payload.strip())
-            payload = {}
+            parsed_payload = None
+            try:
+                parsed_payload = json.loads(raw_payload.strip())
+            except (json.JSONDecodeError, TypeError, ValueError):
+                parsed_payload = None
+
+            if isinstance(parsed_payload, dict):
+                payload = dict(parsed_payload)
+                for key_alias in ('user_prompt_context', 'konteks', 'prompt', 'context'):
+                    alias_val = payload.get(key_alias)
+                    if isinstance(alias_val, str) and alias_val.strip():
+                        prompt_candidates.append(alias_val.strip())
+            else:
+                prompt_candidates.append(raw_payload.strip())
+                payload = {}
         elif isinstance(raw_payload, dict):
             payload = dict(raw_payload)
             for key_alias in ('user_prompt_context', 'konteks', 'prompt', 'context'):
