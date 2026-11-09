@@ -528,6 +528,7 @@ class SuratExecutionTools:
             "qr_code_url": qr_code_url,
             "qr_verification_code": qr_code_url,
             "final_approved_content": resolved_content,
+            "final_content": resolved_content,
             "ai_original_draft": surat_request.ai_original_draft or "",
             "isi_surat": resolved_content,
             "tanggal_surat": timezone.now().strftime("%d %B %Y"),
@@ -547,7 +548,7 @@ class SuratExecutionTools:
         Memeriksa apakah sebuah berkas template HTML di disk:
         1. Berukuran > 0 byte (tidak kosong).
         2. Memiliki placeholder untuk merender isi surat hasil AI (`final_approved_content`,
-           `ai_original_draft`, atau `isi_surat`).
+           `final_content`, `ai_original_draft`, atau `isi_surat`).
         3. Bebas dari tag rusak `{{ ../` yang memicu `TemplateSyntaxError`.
         """
         try:
@@ -561,7 +562,7 @@ class SuratExecutionTools:
                 return False
             has_ai_content_placeholder = any(
                 tag in raw_html
-                for tag in ("final_approved_content", "ai_original_draft", "isi_surat")
+                for tag in ("final_approved_content", "final_content", "ai_original_draft", "isi_surat")
             )
             return has_ai_content_placeholder
         except Exception:

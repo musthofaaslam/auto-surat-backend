@@ -1,3 +1,4 @@
+import inspect
 from rest_framework import serializers
 from .helpers import (
     validate_payment_status,
@@ -108,6 +109,23 @@ SURAT_VALIDATORS = {
     "SI-MAG": validate_si_mag,
     "SI-SUR": validate_si_sur,
 }
+def _normalize_courses_data(student_data, courses_data):
+    """Menormalisasi courses_data agar toleran terhadap None dan field DB ('student_id', 'course_id')."""
+    if not isinstance(courses_data, list):
+        return []
+    default_nim = student_data.get("nim", "") if isinstance(student_data, dict) else ""
+    normalized = []
+    for item in courses_data:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        if "nim" not in row:
+            row["nim"] = row.get("student_id") or default_nim
+        if "kode_matkul" not in row and "course_id" in row:
+            row["kode_matkul"] = row["course_id"]
+        normalized.append(row)
+    return normalized
+
 def run_validators(kode_surat, student_data, payload, student_courses_data=None):
     """Fungsi orkestrator utama untuk menjalankan global dan specific check."""
     # 1. Jalankan validasi global terlebih dahulu
@@ -115,9 +133,37 @@ def run_validators(kode_surat, student_data, payload, student_courses_data=None)
 
     # 2. Jalankan validasi spesifik berdasarkan jenis surat
     validator_func = SURAT_VALIDATORS.get(kode_surat)
-    if validator_func:
-        # Cek apakah validator butuh parameter tambahan courses_data
-        if kode_surat in ["SP-TRA", "SI-SUR"]:
-            validator_func(student_data, payload, student_courses_data)
+    if not validator_func:
+        return
+
+    # Kompatibilitas dengan adapter di surat/agents/backend_bridge.py jika sudah dibungkus
+    if getattr(validator_func, "_is_agent_adapted", False):
+        validator_func(student_data, payload, student_courses_data)
+        return
+
+    safe_payload = payload if isinstance(payload, dict) else {}
+    norm_courses = _normalize_courses_data(student_data, student_courses_data)
+
+    # 3. Penanganan parameter spesifik dan inspeksi arity secara dinamis
+    if kode_surat == "SP-TRA":
+        semester_aktif = (
+            student_data.get("semester_aktif", 1)
+            if isinstance(student_data, dict)
+            else 1
+        )
+        validator_func(student_data, norm_courses, semester_aktif)
+    elif kode_surat == "SI-SUR":
+        # Ambil kode mata kuliah jika ada di payload
+        course_code = safe_payload.get("kode_matkul") or safe_payload.get("course_code")
+        if course_code:
+            validator_func(student_data, safe_payload, norm_courses)
+        # Jika belum ada (fase awal draf AI), lewati pengecekan agar draf dapat diproses oleh LLM
+    else:
+        sig = inspect.signature(validator_func)
+        param_count = len(sig.parameters)
+        if param_count == 1:
+            validator_func(student_data)
+        elif param_count == 2:
+            validator_func(student_data, safe_payload)
         else:
-            validator_func(student_data, payload)
+            validator_func(student_data, safe_payload, norm_courses)

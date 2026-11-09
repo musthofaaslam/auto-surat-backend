@@ -290,37 +290,26 @@ def _execute_redraft_agent_worker(
             student_metadata=student_metadata,
         )
 
-        if hasattr(draft_output, "to_payload_dict") and callable(draft_output.to_payload_dict):
-            structured_payload: Dict[str, Any] = draft_output.to_payload_dict()
-        elif hasattr(draft_output, "extracted_payload"):
-            payload_obj = draft_output.extracted_payload
-            if hasattr(payload_obj, "model_dump") and callable(payload_obj.model_dump):
-                structured_payload = payload_obj.model_dump(mode="json")
-            else:
-                structured_payload = dict(payload_obj)
-        elif hasattr(draft_output, "model_dump") and callable(draft_output.model_dump):
-            structured_payload = draft_output.model_dump(mode="json")
-        else:
-            structured_payload = dict(draft_output)
+        from .agents import evaluate_draft_readiness, ensure_approval_queue_for_request
 
-        critique_score = draft_output.evaluation.self_critique_score
-        # Memeriksa apakah masih ada field wajib yang bernilai kosong/null
-        has_null_required = any(
-            v is None for k, v in structured_payload.items() 
-            if k in ["tanggal_mulai", "tanggal_selesai", "posisi_dilamar"]
+        # Evaluasi kelengkapan draf dinamis untuk ke-10 jenis surat menggunakan evaluator resmi modul agen
+        readiness = evaluate_draft_readiness(
+            draft_output=draft_output,
+            kode_surat=kode_surat,
+            agent=active_agent,
         )
 
-        surat_req.payload_data = dict(structured_payload)
-        surat_req.ai_original_draft = draft_output.ai_original_draft
-        surat_req.self_critique_score = critique_score
-        surat_req.revision_notes = list(draft_output.evaluation.revision_notes)
+        surat_req.payload_data = readiness["structured_payload"]
+        surat_req.ai_original_draft = getattr(draft_output, "ai_original_draft", "")
+        surat_req.self_critique_score = readiness["critique_score"]
+        surat_req.revision_notes = readiness["revision_notes"]
 
-        if critique_score < 8 or has_null_required:
-            surat_req.status = SuratStatus.REVISION_REQUIRED
-            action_code = "AI_REDRAFT_STILL_INCOMPLETE"
-        else:
+        if readiness["is_ready_for_approval"]:
             surat_req.status = SuratStatus.PENDING_APPROVAL
             action_code = "AI_REDRAFT_SUCCESS_PENDING_APPROVAL"
+        else:
+            surat_req.status = SuratStatus.REVISION_REQUIRED
+            action_code = "AI_REDRAFT_STILL_INCOMPLETE"
 
         surat_req.save(
             update_fields=[
@@ -334,6 +323,7 @@ def _execute_redraft_agent_worker(
 
         if surat_req.status == SuratStatus.PENDING_APPROVAL:
             create_approval_workflow_for_request(surat_req, surat_req.student)
+            ensure_approval_queue_for_request(surat_req)
 
         SuratAuditLog.objects.create(
             surat_request=surat_req,

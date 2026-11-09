@@ -93,8 +93,9 @@ def render_and_upload_pdf(template_path, context_data):
         template_path = "kerangka-surat/base_surat.html"
 
     safe_context = dict(context_data or {})
-    if "final_content" in safe_context and isinstance(safe_context["final_content"], str):
-        safe_context["final_content"] = _sanitize_html_for_pdf(safe_context["final_content"])
+    for content_key in ("final_content", "final_approved_content", "isi_surat"):
+        if content_key in safe_context and isinstance(safe_context[content_key], str):
+            safe_context[content_key] = _sanitize_html_for_pdf(safe_context[content_key])
 
     # Render string HTML menggunakan template engine Django
     html_string = render_to_string(template_path, safe_context)

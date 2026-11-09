@@ -134,7 +134,7 @@
 
     <!-- ISI SURAT (HASIL RENDER HTML DARI AI) -->
     <div class="isi-surat">
-        {{ final_content|safe }}
+        {{ final_approved_content|default:final_content|default:isi_surat|safe }}
     </div>
 
     <!-- TANDA TANGAN & TTE DIGITAL -->
