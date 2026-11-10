@@ -30,12 +30,18 @@ import {
   Send,
 } from 'lucide-react';
 
+interface ChatActionOption {
+  label: string;
+  value: string;
+}
+
 interface ChatMessageItem {
   id: string;
   sender: 'user' | 'assistant' | 'system';
   text: string;
   timestamp: string;
-  action_required?: 'delivery_method' | null;
+  action_required?: 'delivery_method' | 'switch_confirmation' | string | null;
+  action_options?: ChatActionOption[];
   isStreaming?: boolean;
 }
 
@@ -153,6 +159,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
   const [chatMissingFields, setChatMissingFields] = useState<string[]>([]);
   const [chatRequiredFields, setChatRequiredFields] = useState<DynamicFieldDef[]>([]);
   const [chatIsReadyToDraft, setChatIsReadyToDraft] = useState<boolean>(false);
+  const [chatSubmissionRejectedReason, setChatSubmissionRejectedReason] = useState<string | null>(null);
   const [chatAttachments, setChatAttachments] = useState<File[]>([]);
   const [showMentionMenu, setShowMentionMenu] = useState<boolean>(false);
 
@@ -198,6 +205,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
               text: m.text,
               timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               action_required: idx === data.messages.length - 1 ? (data.action_required || null) : null,
+              action_options: idx === data.messages.length - 1 ? (data.action_options || []) : [],
             }))
           : [
               {
@@ -224,6 +232,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
         data.status === 'ready_to_draft' ||
         data.state === 'READY_TO_DRAFT';
       setChatIsReadyToDraft(isReady);
+      setChatSubmissionRejectedReason(null);
     } catch {
       sessionStorage.removeItem('active_chat_thread_id');
       initChatSession();
@@ -252,6 +261,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
       setChatCollectedSlots({});
       setChatMissingFields([]);
       setChatIsReadyToDraft(false);
+      setChatSubmissionRejectedReason(null);
       setChatDetectedIntent(docType || null);
     } catch {
       setChatMessages([
@@ -295,6 +305,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     if (typeof presetText !== 'string') {
       setChatInput('');
     }
+    setChatSubmissionRejectedReason(null);
     setIsChatLoading(true);
 
     try {
@@ -313,11 +324,14 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
       if (resp.missing_fields) setChatMissingFields(resp.missing_fields);
       if (resp.required_fields) setChatRequiredFields(resp.required_fields);
 
-      const isReady =
-        resp.is_ready_to_draft === true ||
-        resp.status === 'ready_to_draft' ||
-        resp.state === 'READY_TO_DRAFT';
-      setChatIsReadyToDraft(isReady);
+      if (resp.is_ready_to_draft !== undefined) {
+        setChatIsReadyToDraft(resp.is_ready_to_draft);
+      } else {
+        const isReady =
+          resp.status === 'ready_to_draft' ||
+          resp.state === 'READY_TO_DRAFT';
+        setChatIsReadyToDraft(isReady);
+      }
 
       const botMsg: ChatMessageItem = {
         id: `assistant-${Date.now()}`,
@@ -325,6 +339,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
         text: resp.reply,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         action_required: resp.action_required || null,
+        action_options: resp.action_options || [],
         isStreaming: true,
       };
       setChatMessages((prev) => [...prev, botMsg]);
@@ -344,6 +359,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
   const handleProceedFromChatToSubmission = async () => {
     const finalKodeSurat = chatDetectedIntent || selectedKodeSurat || 'SK-KUL';
     setIsChatLoading(true);
+    setChatSubmissionRejectedReason(null);
 
     try {
       const payload: Record<string, any> = {
@@ -372,16 +388,52 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
         setActiveTab('form');
       }
     } catch (err: any) {
+      const parsedError = extractErrorMessage(err, 'Gagal meneruskan draf dari percakapan AI.');
+      // Matikan status siap draf agar tombol "Lanjutkan & Simpan Draf Permohonan" disembunyikan
+      setChatIsReadyToDraft(false);
+      setChatSubmissionRejectedReason(parsedError);
+
       const errMsg: ChatMessageItem = {
         id: `err-sub-${Date.now()}`,
         sender: 'system',
-        text: extractErrorMessage(err, 'Gagal meneruskan draf dari percakapan AI.'),
+        text: parsedError,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setChatMessages((prev) => [...prev, errMsg]);
     } finally {
       setIsChatLoading(false);
     }
+  };
+
+  const getActionOptionsForMessage = (msg: ChatMessageItem): ChatActionOption[] => {
+    if (msg.action_options && msg.action_options.length > 0) {
+      return msg.action_options;
+    }
+    if (msg.action_required === 'delivery_method') {
+      return [
+        { label: 'Email', value: 'Email' },
+        { label: 'Telegram', value: 'Telegram' },
+      ];
+    }
+    if (msg.action_required === 'switch_confirmation') {
+      return [
+        { label: 'Ya, Beralih Surat', value: 'Ya' },
+        { label: 'Tidak, Lanjutkan Sebelumnya', value: 'Tidak' },
+      ];
+    }
+    const lowerText = msg.text.toLowerCase();
+    if (
+      lowerText.includes('apakah anda ingin membatalkan') ||
+      lowerText.includes('beralih membuat') ||
+      lowerText.includes("ketik 'ya'") ||
+      lowerText.includes("ketik **'ya'**")
+    ) {
+      return [
+        { label: 'Ya, Beralih Surat', value: 'Ya' },
+        { label: 'Tidak, Lanjutkan Sebelumnya', value: 'Tidak' },
+      ];
+    }
+    return [];
   };
 
   // =========================================================================
@@ -814,107 +866,132 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
 
           {/* Chat Message Stream */}
           <div ref={chatMessagesContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-            {chatMessages.map((msg) => {
-              const isUser = msg.sender === 'user';
-              const isSystem = msg.sender === 'system';
+            {(() => {
+              const latestAssistantMsgId = [...chatMessages].reverse().find((m) => m.sender === 'assistant')?.id;
 
-              if (isSystem) {
+              return chatMessages.map((msg) => {
+                const isUser = msg.sender === 'user';
+                const isSystem = msg.sender === 'system';
+
+                if (isSystem) {
+                  return (
+                    <div
+                      key={msg.id}
+                      className="text-center py-2 text-[11px] font-normal text-rose-600"
+                    >
+                      {msg.text}
+                    </div>
+                  );
+                }
+
+                const actionOptions = !isUser && !msg.isStreaming ? getActionOptionsForMessage(msg) : [];
+                const isLatestAssistant = msg.id === latestAssistantMsgId;
+                const isDeliveryAction = msg.action_required === 'delivery_method';
+                const isDeliveryAlreadyChosen = isDeliveryAction && Boolean(chatCollectedSlots.chosen_destination);
+                const isButtonsDisabled = isChatLoading || !isLatestAssistant || isDeliveryAlreadyChosen;
+
                 return (
                   <div
                     key={msg.id}
-                    className="text-center py-2 text-[11px] font-normal text-rose-600"
-                  >
-                    {msg.text}
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex items-start space-x-2.5 max-w-3xl ${
-                    isUser ? 'ml-auto flex-row-reverse space-x-reverse' : ''
-                  }`}
-                >
-                  <div
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-xs font-semibold ${
-                      isUser
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-blue-600 text-white shadow-2xs'
+                    className={`flex items-start space-x-2.5 max-w-3xl ${
+                      isUser ? 'ml-auto flex-row-reverse space-x-reverse' : ''
                     }`}
                   >
-                    {isUser ? <UserIcon className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
-                  </div>
-
-                  <div className="space-y-1 max-w-[85%] sm:max-w-xl">
                     <div
-                      className={`p-3.5 rounded-2xl text-xs font-normal leading-relaxed whitespace-pre-wrap ${
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-xs font-semibold ${
                         isUser
-                          ? 'bg-slate-900 text-white rounded-tr-none'
-                          : 'bg-white border border-slate-200/90 text-slate-900 rounded-tl-none shadow-2xs'
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-blue-600 text-white shadow-2xs'
                       }`}
                     >
-                      {isUser ? (
-                        msg.text
-                      ) : (
-                        <TypewriterText
-                          content={msg.text}
-                          isStreaming={msg.isStreaming}
-                          onTick={() => {
-                            if (chatMessagesContainerRef.current) {
-                              chatMessagesContainerRef.current.scrollTop =
-                                chatMessagesContainerRef.current.scrollHeight;
-                            }
-                          }}
-                          onFinish={() => {
-                            setChatMessages((prev) =>
-                              prev.map((m) =>
-                                m.id === msg.id ? { ...m, isStreaming: false } : m
-                              )
-                            );
-                            if (chatMessagesContainerRef.current) {
-                              chatMessagesContainerRef.current.scrollTop =
-                                chatMessagesContainerRef.current.scrollHeight;
-                            }
-                          }}
-                        />
-                      )}
-
-                      {/* State 3 Action Required: Interactive Delivery Method Buttons */}
-                      {!isUser && msg.action_required === 'delivery_method' && !msg.isStreaming && (
-                        <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={isChatLoading || Boolean(chatCollectedSlots.chosen_destination)}
-                            onClick={() => handleSendChatMessage('Email')}
-                            className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium shadow-2xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <Mail className="w-3.5 h-3.5 text-blue-600" />
-                            <span>Email</span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isChatLoading || Boolean(chatCollectedSlots.chosen_destination)}
-                            onClick={() => handleSendChatMessage('Telegram')}
-                            className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium shadow-2xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <Send className="w-3.5 h-3.5 text-sky-600" />
-                            <span>Telegram</span>
-                          </button>
-                        </div>
-                      )}
+                      {isUser ? <UserIcon className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
                     </div>
-                    <div
-                      className={`text-[10px] text-slate-400 font-normal px-1 ${
-                        isUser ? 'text-right' : 'text-left'
-                      }`}
-                    >
-                      {msg.timestamp}
+
+                    <div className="space-y-1 max-w-[85%] sm:max-w-xl">
+                      <div
+                        className={`p-3.5 rounded-2xl text-xs font-normal leading-relaxed whitespace-pre-wrap ${
+                          isUser
+                            ? 'bg-slate-900 text-white rounded-tr-none'
+                            : 'bg-white border border-slate-200/90 text-slate-900 rounded-tl-none shadow-2xs'
+                        }`}
+                      >
+                        {isUser ? (
+                          msg.text
+                        ) : (
+                          <TypewriterText
+                            content={msg.text}
+                            isStreaming={msg.isStreaming}
+                            onTick={() => {
+                              if (chatMessagesContainerRef.current) {
+                                chatMessagesContainerRef.current.scrollTop =
+                                  chatMessagesContainerRef.current.scrollHeight;
+                              }
+                            }}
+                            onFinish={() => {
+                              setChatMessages((prev) =>
+                                prev.map((m) =>
+                                  m.id === msg.id ? { ...m, isStreaming: false } : m
+                                )
+                              );
+                              if (chatMessagesContainerRef.current) {
+                                chatMessagesContainerRef.current.scrollTop =
+                                  chatMessagesContainerRef.current.scrollHeight;
+                              }
+                            }}
+                          />
+                        )}
+
+                        {/* Interactive Option Buttons (Delivery, Switch Confirmation, or any LLM choices) */}
+                        {actionOptions.length > 0 && (
+                          <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+                            {actionOptions.map((opt) => {
+                              const valLower = opt.value.toLowerCase();
+                              const isEmail = valLower === 'email';
+                              const isTelegram = valLower === 'telegram';
+                              const isYes = valLower === 'ya' || valLower.startsWith('ya');
+                              const isNo = valLower === 'tidak' || valLower.startsWith('tidak');
+
+                              let buttonStyle = 'border-slate-300 bg-white hover:bg-slate-50 text-slate-800';
+                              if (isYes) {
+                                buttonStyle = 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold';
+                              } else if (isNo) {
+                                buttonStyle = 'border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700';
+                              }
+
+                              return (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  disabled={isButtonsDisabled}
+                                  onClick={() => handleSendChatMessage(opt.value)}
+                                  className={`px-3.5 py-1.5 rounded-lg border text-xs font-medium shadow-2xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${buttonStyle}`}
+                                >
+                                  {isEmail && <Mail className="w-3.5 h-3.5 text-blue-600" />}
+                                  {isTelegram && <Send className="w-3.5 h-3.5 text-sky-600" />}
+                                  {isYes && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                                  {isNo && <X className="w-3.5 h-3.5 text-slate-500" />}
+                                  {!isEmail && !isTelegram && !isYes && !isNo && (
+                                    <ArrowRight className="w-3.5 h-3.5 text-slate-600" />
+                                  )}
+                                  <span>{opt.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        className={`text-[10px] text-slate-400 font-normal px-1 ${
+                          isUser ? 'text-right' : 'text-left'
+                        }`}
+                      >
+                        {msg.timestamp}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
 
             {isChatLoading && (
               <div className="flex items-center space-x-2 text-xs font-normal text-slate-500 py-2">
@@ -923,8 +1000,37 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
               </div>
             )}
 
-            {/* Ready to draft banner */}
-            {chatIsReadyToDraft && (
+            {/* Rejection Banner when requirements fail */}
+            {chatSubmissionRejectedReason && (
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-2xs">
+                <div className="flex items-start space-x-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-semibold block text-rose-900">
+                      Pengajuan Draf Tidak Dapat Dilanjutkan
+                    </span>
+                    <span className="text-rose-700 leading-relaxed block whitespace-pre-line">
+                      {chatSubmissionRejectedReason}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChatSubmissionRejectedReason(null);
+                    sessionStorage.removeItem('active_chat_thread_id');
+                    initChatSession();
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition shrink-0 flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Mulai Ulang / Pilih Surat Lain</span>
+                </button>
+              </div>
+            )}
+
+            {/* Ready to draft banner (only shown if not rejected) */}
+            {chatIsReadyToDraft && !chatSubmissionRejectedReason && (
               <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-normal text-emerald-950 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-2xs">
                 <div className="flex items-center space-x-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />

@@ -128,6 +128,12 @@ export interface SuratRequestDetail {
   target_destination_address?: string | null;
 }
 
+export interface ChatActionOption {
+  label: string;
+  value: string;
+  style?: 'primary' | 'secondary' | 'danger';
+}
+
 export interface ChatThreadInitResponse {
   status: string;
   message: string;
@@ -142,7 +148,8 @@ export interface ChatSessionMessageResponse {
   state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
   reply: string;
   is_ready_to_draft?: boolean;
-  action_required?: 'delivery_method' | null;
+  action_required?: 'delivery_method' | 'switch_confirmation' | string | null;
+  action_options?: ChatActionOption[];
   intent?: string;
   detected_intent?: string;
   kode_surat?: string;
@@ -156,7 +163,9 @@ export interface ChatSessionDetailResponse {
   status: 'success' | 'ready_to_draft' | 'error';
   state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
   is_ready_to_draft: boolean;
-  action_required?: 'delivery_method' | null;
+  action_required?: 'delivery_method' | 'switch_confirmation' | string | null;
+  action_options?: ChatActionOption[];
+  is_waiting_for_switch_confirmation?: boolean;
   thread_id: string;
   title: string;
   intent?: string;

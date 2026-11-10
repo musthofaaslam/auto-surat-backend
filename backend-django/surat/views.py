@@ -471,11 +471,27 @@ class ChatSessionMessageAPIView(APIView):
             for item in required_fields
         )
 
-        surat_is_complete = main_slots_complete and bool(slots.get("chosen_destination")) and bool(slots.get("target_destination_address"))
+        surat_is_complete = (
+            not waiting_confirmation
+            and main_slots_complete
+            and bool(slots.get("chosen_destination"))
+            and bool(slots.get("target_destination_address"))
+        )
 
         action_required = None
-        if main_slots_complete and not slots.get("chosen_destination"):
+        action_options = []
+        if waiting_confirmation:
+            action_required = "switch_confirmation"
+            action_options = [
+                {"label": "Ya, Beralih Surat", "value": "Ya"},
+                {"label": "Tidak, Lanjutkan Sebelumnya", "value": "Tidak"}
+            ]
+        elif main_slots_complete and not slots.get("chosen_destination"):
             action_required = "delivery_method"
+            action_options = [
+                {"label": "Email", "value": "Email"},
+                {"label": "Telegram", "value": "Telegram"}
+            ]
 
         missing_fields = [
             item.get("field") for item in required_fields
@@ -488,9 +504,11 @@ class ChatSessionMessageAPIView(APIView):
                 "state": "READY_TO_DRAFT",
                 "is_ready_to_draft": True,
                 "action_required": None,
+                "action_options": [],
                 "intent": intent,
                 "detected_intent": intent,
                 "kode_surat": intent,
+                "is_waiting_for_switch_confirmation": False,
                 "collected_slots": slots,
                 "missing_fields": [],
                 "required_fields": required_fields,
@@ -503,6 +521,7 @@ class ChatSessionMessageAPIView(APIView):
             "state": "COLLECTING_SLOTS",
             "is_ready_to_draft": False,
             "action_required": action_required,
+            "action_options": action_options,
             "intent": intent,
             "detected_intent": intent,
             "kode_surat": intent,
@@ -528,6 +547,7 @@ class ChatSessionMessageAPIView(APIView):
         session_data = AutoSuratSessionManager.get_session(str(thread.id))
         intent = session_data.get("intent") or thread.document_type
         slots = session_data.get("slots", {})
+        waiting_confirmation = session_data.get("is_waiting_for_switch_confirmation", False)
 
         from .services.chat_workflow import get_effective_required_fields
         required_fields = []
@@ -543,11 +563,27 @@ class ChatSessionMessageAPIView(APIView):
             for item in required_fields
         )
 
-        surat_is_complete = main_slots_complete and bool(slots.get("chosen_destination")) and bool(slots.get("target_destination_address"))
+        surat_is_complete = (
+            not waiting_confirmation
+            and main_slots_complete
+            and bool(slots.get("chosen_destination"))
+            and bool(slots.get("target_destination_address"))
+        )
 
         action_required = None
-        if main_slots_complete and not slots.get("chosen_destination"):
+        action_options = []
+        if waiting_confirmation:
+            action_required = "switch_confirmation"
+            action_options = [
+                {"label": "Ya, Beralih Surat", "value": "Ya"},
+                {"label": "Tidak, Lanjutkan Sebelumnya", "value": "Tidak"}
+            ]
+        elif main_slots_complete and not slots.get("chosen_destination"):
             action_required = "delivery_method"
+            action_options = [
+                {"label": "Email", "value": "Email"},
+                {"label": "Telegram", "value": "Telegram"}
+            ]
 
         missing_fields = [
             item.get("field") for item in required_fields
@@ -574,6 +610,8 @@ class ChatSessionMessageAPIView(APIView):
             "state": state,
             "is_ready_to_draft": surat_is_complete,
             "action_required": action_required,
+            "action_options": action_options,
+            "is_waiting_for_switch_confirmation": waiting_confirmation,
             "thread_id": str(thread.id),
             "title": thread.title,
             "intent": intent,

@@ -254,12 +254,13 @@ def handle_incoming_chat_with_redis(
         new_surat = SuratType.objects.get(kode_surat=detected_kode_surat)
         
         session_data["pending_intent"] = detected_kode_surat
+        session_data["pending_user_message"] = cleaned_msg
         session_data["is_waiting_for_switch_confirmation"] = True
         
         return (
             f"Perhatian: Sesi saat ini sedang memproses **{old_surat.nama_surat}**. "
-            f"Apakah Anda ingin membatalkan draf tersebut dan beralih membuat **{new_surat.nama_surat}**? "
-            f"\n\n(Ketik **'Ya'** untuk beralih atau **'Tidak'** untuk melanjutkan draf sebelumnya)"
+            f"Apakah Anda ingin membatalkan draf tersebut dan beralih membuat **{new_surat.nama_surat}**?\n\n"
+            f"Silakan pilih salah satu opsi di bawah ini:"
         )
 
     # 5. KASUS C: Lanjutkan proses Slot Filling
@@ -269,32 +270,59 @@ def handle_incoming_chat_with_redis(
 def handle_switch_confirmation_redis(user_message: str, thread_id: str, session_data: dict, thread_obj) -> str:
     message_lower = user_message.strip().lower()
     
-    if message_lower in ["ya", "y", "beralih", "lanjutkan"]:
+    is_confirm_yes = (
+        message_lower in ["ya", "y", "beralih", "lanjutkan", "setuju", "ya, beralih surat", "ganti", "ya, ganti surat"]
+        or message_lower.startswith("ya")
+    )
+
+    if is_confirm_yes:
         old_code = session_data.get("intent")
         new_code = session_data.get("pending_intent")
+        pending_msg = session_data.get("pending_user_message") or ""
         
-        # Pindahkan intent, reset slot, matikan flag
+        # Pindahkan intent, reset slot, matikan flag konfirmasi
         session_data["intent"] = new_code
         session_data["pending_intent"] = None
+        session_data["pending_user_message"] = None
         session_data["is_waiting_for_switch_confirmation"] = False
         session_data["slots"] = {}  # Reset bersih cicilan data lama
         
-        new_surat_obj = SuratType.objects.get(kode_surat=new_code)
+        try:
+            new_surat_obj = SuratType.objects.get(kode_surat=new_code)
+            nama_surat = new_surat_obj.nama_surat
+        except SuratType.DoesNotExist:
+            nama_surat = new_code or "Surat Baru"
+            new_surat_obj = None
         
         # Perbarui juga di tabel ChatThread PostgreSQL
-        if thread_obj:
+        if thread_obj and new_surat_obj:
             thread_obj.document_type = new_code
-            thread_obj.title = f"Permohonan {new_surat_obj.nama_surat}"
+            thread_obj.title = f"Permohonan {nama_surat}"
             thread_obj.save(update_fields=['document_type', 'title', 'updated_at'])
             
-        return f"Draf sebelumnya ({old_code}) telah dibatalkan. Berhasil beralih ke **{new_surat_obj.nama_surat}**. Silakan masukkan data yang diperlukan!"
+        slot_reply = process_slot_filling_redis(pending_msg, session_data, is_initial_turn=True)
+        return (
+            f"Draf sebelumnya ({old_code}) telah dibatalkan. Berhasil beralih ke **{nama_surat}**.\n\n"
+            f"{slot_reply}"
+        )
     
     else:
         session_data["pending_intent"] = None
+        session_data["pending_user_message"] = None
         session_data["is_waiting_for_switch_confirmation"] = False
         
-        active_surat_obj = SuratType.objects.get(kode_surat=session_data.get("intent"))
-        return f"Baik, peralihan dibatalkan. Kita tetap melanjutkan pengisian untuk **{active_surat_obj.nama_surat}**."
+        active_code = session_data.get("intent")
+        try:
+            active_surat_obj = SuratType.objects.get(kode_surat=active_code)
+            nama_surat = active_surat_obj.nama_surat
+        except SuratType.DoesNotExist:
+            nama_surat = active_code or "Surat Aktif"
+            
+        slot_reply = process_slot_filling_redis("", session_data, is_initial_turn=False)
+        return (
+            f"Baik, peralihan dibatalkan. Kita tetap melanjutkan pengisian untuk **{nama_surat}**.\n\n"
+            f"{slot_reply}"
+        )
 
 
 def process_slot_filling_redis(

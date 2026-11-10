@@ -16,13 +16,18 @@ import {
   ChevronUp,
   MessageSquare,
   Zap,
+  Mail,
+  X,
 } from 'lucide-react';
-import type { DynamicFieldDef } from '../types';
+import type { DynamicFieldDef, ChatActionOption } from '../types';
 
 interface Message {
+  id?: string;
   sender: 'user' | 'assistant' | 'system';
   text: string;
   timestamp: string;
+  action_required?: 'delivery_method' | 'switch_confirmation' | string | null;
+  action_options?: ChatActionOption[];
 }
 
 interface AIChatDrawerProps {
@@ -138,14 +143,21 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         setRequiredFields(response.required_fields);
       }
 
-      if (response.state === 'READY_TO_DRAFT' || response.status === 'ready_to_draft') {
-        setIsReadyToDraft(true);
+      if (response.is_ready_to_draft !== undefined) {
+        setIsReadyToDraft(response.is_ready_to_draft);
+      } else {
+        const isReady =
+          response.state === 'READY_TO_DRAFT' || response.status === 'ready_to_draft';
+        setIsReadyToDraft(isReady);
       }
 
       const botMsgObj: Message = {
+        id: `bot-${Date.now()}`,
         sender: 'assistant',
         text: response.reply,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        action_required: response.action_required || null,
+        action_options: response.action_options || [],
       };
       setMessages((prev) => [...prev, botMsgObj]);
     } catch {
@@ -160,6 +172,37 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getActionOptionsForMessage = (msg: Message): ChatActionOption[] => {
+    if (msg.action_options && msg.action_options.length > 0) {
+      return msg.action_options;
+    }
+    if (msg.action_required === 'delivery_method') {
+      return [
+        { label: 'Email', value: 'Email' },
+        { label: 'Telegram', value: 'Telegram' },
+      ];
+    }
+    if (msg.action_required === 'switch_confirmation') {
+      return [
+        { label: 'Ya, Beralih Surat', value: 'Ya' },
+        { label: 'Tidak, Lanjutkan Sebelumnya', value: 'Tidak' },
+      ];
+    }
+    const lowerText = msg.text.toLowerCase();
+    if (
+      lowerText.includes('apakah anda ingin membatalkan') ||
+      lowerText.includes('beralih membuat') ||
+      lowerText.includes("ketik 'ya'") ||
+      lowerText.includes("ketik **'ya'**")
+    ) {
+      return [
+        { label: 'Ya, Beralih Surat', value: 'Ya' },
+        { label: 'Tidak, Lanjutkan Sebelumnya', value: 'Tidak' },
+      ];
+    }
+    return [];
   };
 
   const handleProceedToForm = () => {
@@ -244,49 +287,101 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Chat History Panel */}
         <div className="flex-1 flex flex-col p-6 overflow-y-auto bg-slate-50/60 space-y-4">
-          {messages.map((msg, idx) => (
-            <div
-              key={idx}
-              className={`flex items-start space-x-3 max-w-[85%] ${
-                msg.sender === 'user' ? 'ml-auto flex-row-reverse space-x-reverse' : ''
-              }`}
-            >
-              <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                  msg.sender === 'user'
-                    ? 'bg-slate-900 text-white'
-                    : msg.sender === 'assistant'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-amber-100 text-amber-800'
-                }`}
-              >
-                {msg.sender === 'user' ? (
-                  <UserIcon className="w-4 h-4" />
-                ) : (
-                  <Bot className="w-4 h-4" />
-                )}
-              </div>
+          {(() => {
+            const latestAssistantIdx = messages.map((m, i) => m.sender === 'assistant' ? i : -1).filter((i) => i !== -1).pop();
 
-              <div
-                className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
-                  msg.sender === 'user'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : msg.sender === 'assistant'
-                    ? 'bg-white border border-slate-200 text-slate-900 shadow-2xs'
-                    : 'bg-amber-50 border border-amber-200 text-amber-900'
-                }`}
-              >
-                <p className="whitespace-pre-wrap">{msg.text}</p>
-                <span
-                  className={`block text-[10px] font-mono mt-1.5 ${
-                    msg.sender === 'user' ? 'text-slate-400 text-right' : 'text-slate-400'
+            return messages.map((msg, idx) => {
+              const actionOptions = msg.sender === 'assistant' ? getActionOptionsForMessage(msg) : [];
+              const isLatestAssistant = idx === latestAssistantIdx;
+              const isDeliveryAction = msg.action_required === 'delivery_method';
+              const isDeliveryAlreadyChosen = isDeliveryAction && Boolean(collectedSlots.chosen_destination);
+              const isButtonsDisabled = isLoading || !isLatestAssistant || isDeliveryAlreadyChosen;
+
+              return (
+                <div
+                  key={idx}
+                  className={`flex items-start space-x-3 max-w-[85%] ${
+                    msg.sender === 'user' ? 'ml-auto flex-row-reverse space-x-reverse' : ''
                   }`}
                 >
-                  {msg.timestamp}
-                </span>
-              </div>
-            </div>
-          ))}
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                      msg.sender === 'user'
+                        ? 'bg-slate-900 text-white'
+                        : msg.sender === 'assistant'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {msg.sender === 'user' ? (
+                      <UserIcon className="w-4 h-4" />
+                    ) : (
+                      <Bot className="w-4 h-4" />
+                    )}
+                  </div>
+
+                  <div
+                    className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
+                      msg.sender === 'user'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : msg.sender === 'assistant'
+                        ? 'bg-white border border-slate-200 text-slate-900 shadow-2xs'
+                        : 'bg-amber-50 border border-amber-200 text-amber-900'
+                    }`}
+                  >
+                    <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                    {/* Interactive Option Buttons */}
+                    {actionOptions.length > 0 && (
+                      <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+                        {actionOptions.map((opt) => {
+                          const valLower = opt.value.toLowerCase();
+                          const isEmail = valLower === 'email';
+                          const isTelegram = valLower === 'telegram';
+                          const isYes = valLower === 'ya' || valLower.startsWith('ya');
+                          const isNo = valLower === 'tidak' || valLower.startsWith('tidak');
+
+                          let buttonStyle = 'border-slate-300 bg-white hover:bg-slate-50 text-slate-800';
+                          if (isYes) {
+                            buttonStyle = 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold';
+                          } else if (isNo) {
+                            buttonStyle = 'border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700';
+                          }
+
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              disabled={isButtonsDisabled}
+                              onClick={() => handleSendMessage(opt.value)}
+                              className={`px-3 py-1 rounded-lg border text-xs font-medium shadow-2xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${buttonStyle}`}
+                            >
+                              {isEmail && <Mail className="w-3.5 h-3.5 text-blue-600" />}
+                              {isTelegram && <Send className="w-3.5 h-3.5 text-sky-600" />}
+                              {isYes && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                              {isNo && <X className="w-3.5 h-3.5 text-slate-500" />}
+                              {!isEmail && !isTelegram && !isYes && !isNo && (
+                                <ArrowRight className="w-3.5 h-3.5 text-slate-600" />
+                              )}
+                              <span>{opt.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <span
+                      className={`block text-[10px] font-mono mt-1.5 ${
+                        msg.sender === 'user' ? 'text-slate-400 text-right' : 'text-slate-400'
+                      }`}
+                    >
+                      {msg.timestamp}
+                    </span>
+                  </div>
+                </div>
+              );
+            });
+          })()}
 
           {isLoading && (
             <div className="flex items-center space-x-3 max-w-[70%]">

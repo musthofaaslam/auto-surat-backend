@@ -85,6 +85,7 @@ class AutoSuratSessionManager:
             "intent": intent,
             "pending_intent": None,
             "is_waiting_for_switch_confirmation": False,
+            "pending_user_message": None,
             "slots": reconstructed_slots,
         }
 
@@ -106,7 +107,8 @@ class AutoSuratSessionManager:
         slots: Optional[Dict[str, Any]] = None, 
         missing_slots: Optional[list] = None,
         pending_intent: Optional[str] = None,
-        is_waiting_for_switch_confirmation: Optional[bool] = None
+        is_waiting_for_switch_confirmation: Optional[bool] = None,
+        pending_user_message: Optional[str] = None,
     ):
         """
         Menyimpan atau memperbarui state ke Redis Cache dengan Sliding TTL 30 menit.
@@ -129,6 +131,7 @@ class AutoSuratSessionManager:
             "intent": intent if intent is not None else existing.get("intent"),
             "pending_intent": pending_intent if pending_intent is not None else existing.get("pending_intent"),
             "is_waiting_for_switch_confirmation": is_waiting_for_switch_confirmation if is_waiting_for_switch_confirmation is not None else existing.get("is_waiting_for_switch_confirmation", False),
+            "pending_user_message": pending_user_message if pending_user_message is not None else existing.get("pending_user_message"),
             "slots": slots if slots is not None else existing.get("slots", {}),
             "missing_slots": missing_slots if missing_slots is not None else existing.get("missing_slots", [])
         }
