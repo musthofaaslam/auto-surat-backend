@@ -97,8 +97,12 @@ def render_and_upload_pdf(template_path, context_data):
         if content_key in safe_context and isinstance(safe_context[content_key], str):
             safe_context[content_key] = _sanitize_html_for_pdf(safe_context[content_key])
 
-    # Render string HTML menggunakan template engine Django
-    html_string = render_to_string(template_path, safe_context)
+    # Render string HTML menggunakan template engine Django dengan mekanisme fallback aman
+    try:
+        html_string = render_to_string(template_path, safe_context)
+    except Exception:
+        fallback_path = "kerangka-surat/base_surat.html"
+        html_string = render_to_string(fallback_path, safe_context)
 
     pdf_temp_path = None
     try:

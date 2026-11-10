@@ -230,3 +230,10 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', '')
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+
+# ==============================================================================
+# KONFIGURASI DEMO ONE-STEP APPROVAL (NON-DESTRUCTIVE INTERCEPTOR)
+# ==============================================================================
+DEMO_ONE_STEP_APPROVAL = os.environ.get('DEMO_ONE_STEP_APPROVAL', 'True').lower() == 'true'
+DEMO_APPROVER_NIP = os.environ.get('DEMO_APPROVER_NIP', '198001012005011001')
+DEMO_TARGET_SURAT = ['SR-MAG', 'SR-BEA']

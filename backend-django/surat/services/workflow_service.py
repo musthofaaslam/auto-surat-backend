@@ -54,11 +54,24 @@ def process_approval_action(
 
     surat_req = approval_step.surat_request
 
+    # Evaluasi otorisasi demo: Khusus SR-MAG dan SR-BEA untuk akun Dr. Joel Evans, M.T.
+    from django.conf import settings
+    demo_enabled = getattr(settings, 'DEMO_ONE_STEP_APPROVAL', True)
+    demo_target_surat = getattr(settings, 'DEMO_TARGET_SURAT', ['SR-MAG', 'SR-BEA'])
+    demo_approver_nip = getattr(settings, 'DEMO_APPROVER_NIP', '198001012005011001')
+    lecturer_nip = getattr(getattr(lecturer, 'user', None), 'nip_nim', None)
+    lecturer_nama = getattr(getattr(lecturer, 'user', None), 'nama', '')
+    is_demo_bypass = (
+        demo_enabled
+        and surat_req.kode_surat.kode_surat in demo_target_surat
+        and (lecturer_nip == demo_approver_nip or "Joel Evans" in lecturer_nama)
+    )
+
     # Validasi kepemilikan approver
-    if approval_step.approver != lecturer:
+    if not is_demo_bypass and approval_step.approver != lecturer:
         return {"error": "Anda tidak memiliki hak akses untuk menyetujui antrean ini."}, 403
 
-    if approval_step.status != 'PENDING':
+    if not is_demo_bypass and approval_step.status != 'PENDING':
         return {"error": "Langkah persetujuan ini belum aktif atau sudah diproses sebelumnya."}, 400
 
     # Handle REJECT
@@ -87,11 +100,13 @@ def process_approval_action(
         if isinstance(final_approved_content, str) and final_approved_content.strip():
             surat_req.final_approved_content = final_approved_content.strip()
 
-        # Cek apakah masih ada step approval berikutnya
-        next_step = SuratApproval.objects.filter(
-            surat_request=surat_req, 
-            step_order=approval_step.step_order + 1
-        ).first()
+        # Cek apakah masih ada step approval berikutnya (dilewati pada mode demo 1-step Joel Evans)
+        next_step = None
+        if not is_demo_bypass:
+            next_step = SuratApproval.objects.filter(
+                surat_request=surat_req, 
+                step_order=approval_step.step_order + 1
+            ).first()
 
         if next_step:
             # Aktifkan step berikutnya menjadi PENDING
