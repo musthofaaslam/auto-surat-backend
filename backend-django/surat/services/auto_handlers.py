@@ -1,4 +1,3 @@
-# apps/surat/services/auto_handlers.py
 import cloudinary.uploader
 from .number_service import generate_surat_number
 from .tte_service import create_tte_signature
@@ -16,21 +15,6 @@ def handle_auto_approval_surat(student, surat_type, payload_data, attachments_fi
         payload_data=payload_data,
         status='APPROVED'
     )
-
-    # 2. Tangani file lampiran (attachments) dan unggah ke Cloudinary
-    # if attachments_files:
-    #     for file_obj in attachments_files:
-    #         upload_res = cloudinary.uploader.upload(
-    #             file_obj, 
-    #             resource_type="auto", 
-    #             folder="autosurat_attachments"
-    #         )
-    #         SuratAttachment.objects.create(
-    #             surat_request=surat_req,
-    #             nama_dokumen=file_obj.name,
-    #             file_url=upload_res.get("secure_url"),
-    #             mime_type=getattr(file_obj, 'content_type', 'application/octet-stream')
-    #         )
 
     # 3. Generate Nomor Resmi Surat
     nomor_resmi = generate_surat_number(surat_type, fakultas=student.fakultas)

@@ -62,7 +62,7 @@ ROOT_URLCONF = 'core.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'], # <-- Pastikan baris ini ada dan mengarah ke folder templates
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -93,7 +93,6 @@ DATABASES = {
     'default': dj_database_url.config(
         default=db_url,
         conn_max_age=600,
-        # conn_health_checks_enabled=True,
     )
 }
 
@@ -177,8 +176,6 @@ CLOUDINARY_STORAGE = {
 # Gunakan Cloudinary sebagai media storage default (untuk upload file/gambar pengguna)
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
-# settings.py
-
 AUTHENTICATION_BACKENDS = [
     'accounts.backends.CustomUserAuthBackend',
 ]
@@ -186,12 +183,11 @@ AUTHENTICATION_BACKENDS = [
 # Konfigurasi tambahan untuk SimpleJWT (opsional tapi disarankan)
 from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1), # Atur masa aktif sesuai kebutuhan
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# settings.py
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'accounts.authentication.CustomJWTAuthentication',

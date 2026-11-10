@@ -25,19 +25,6 @@ class Command(BaseCommand):
                 }
             )
 
-        # 2. Seed Surat Types
-        # self.stdout.write("Seeding Surat Types...")
-        # for st in data['surat_types']:
-        #     SuratType.objects.update_or_create(
-        #         kode_surat=st['kode_surat'],
-        #         defaults={
-        #             'nama_surat': st['nama_surat'],
-        #             'kategori': st['kategori'],
-        #             'is_auto_approval': st['is_auto_approval'],
-        #             'template_path': st['template_path']
-        #         }
-        #     )
-
         # 3. Seed Faculties & Departments
         self.stdout.write("Seeding Faculties & Departments...")
         for fac in data['faculties']:

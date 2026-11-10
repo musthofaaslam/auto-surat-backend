@@ -1,4 +1,3 @@
-# apps/surat/services/manual_handlers.py
 import cloudinary.uploader
 from django.conf import settings
 from accounts.models import Lecturer

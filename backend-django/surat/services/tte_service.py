@@ -1,4 +1,3 @@
-# apps/surat/services/tte_service.py
 import hashlib
 import uuid
 from ..models import TteSignature

@@ -1,4 +1,3 @@
-# apps/accounts/backends.py
 import secrets
 from django.contrib.auth.backends import BaseBackend
 from django.contrib.auth.hashers import check_password, make_password

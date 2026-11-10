@@ -874,7 +874,7 @@ class SuratRequestCreateAPIView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        # ndwfevirc kwc
+
         raw_kode_surat = request.data.get("kode_surat")
         if isinstance(raw_kode_surat, str) and raw_kode_surat.strip():
             try:
@@ -943,8 +943,8 @@ class SuratRequestCreateAPIView(APIView):
             status=SuratStatus.SUBMITTED,
             payload_data=initial_payload,
             user_prompt_context=user_prompt_context,
-            chosen_destination=chosen_destination,             # <-- Tambahkan ini
-            target_destination_address=target_destination_address, # <-- Tambahkan ini (sesuaikan nama field modelmu)
+            chosen_destination=chosen_destination,
+            target_destination_address=target_destination_address,
         )
 
         SuratAuditLog.objects.create(
@@ -967,7 +967,7 @@ class SuratRequestCreateAPIView(APIView):
                 "kode_surat": surat_type.kode_surat,
                 "student_metadata": student_metadata,
                 "agent": self.get_drafting_agent(),
-                "dynamic_fields_dict": dynamic_fields_dict, # <-- Teruskan data dinamis ke worker
+                "dynamic_fields_dict": dynamic_fields_dict,
             },
             name=f"surat-drafting-agent-{surat_req.id}",
             daemon=True,
@@ -1376,3 +1376,4 @@ class SuratDownloadPdfAPIView(APIView):
         response = FileResponse(open(found_path, "rb"), content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="surat_{nomor_clean}.pdf"'
         return response
+

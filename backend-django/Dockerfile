@@ -34,5 +34,4 @@ COPY . .
 EXPOSE 8000
 
 # 8. Perintah untuk menjalankan Django pakai uvicorn (ASGI server) di port 8000
-# Catatan: Ganti 'core' dengan nama folder project Django milikmu (folder tempat asgi.py berada)
 CMD ["uvicorn", "core.asgi:application", "--host", "0.0.0.0", "--port", "8000"]

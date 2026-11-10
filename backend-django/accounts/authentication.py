@@ -1,13 +1,6 @@
-# accounts/authentication.py
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from .models import User
-
-# SARAN PERBAIKAN ARSITEKTURAL:
-# Pastikan modul `accounts.authentication` dimuat saat inisialisasi aplikasi
-# (misalnya melalui `AccountsConfig.ready()` pada `accounts/apps.py`) agar
-# `CustomJWTAuthenticationScheme` selalu terdaftar di registry drf-spectacular
-# sebelum perintah `python manage.py spectacular --validate` dieksekusi.
 
 
 class CustomJWTAuthentication(JWTAuthentication):

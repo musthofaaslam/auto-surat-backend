@@ -1,4 +1,3 @@
-# accounts/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -22,8 +21,8 @@ class LoginAPIView(APIView):
         request=LoginSerializer,
         responses={
             200: LoginResponseSuccessSerializer,
-            400: StandardErrorResponseSerializer, # Pakai yang global!
-            401: StandardErrorResponseSerializer, # Pakai yang global!
+            400: StandardErrorResponseSerializer,
+            401: StandardErrorResponseSerializer,
         }
     )
     
@@ -78,8 +77,8 @@ class GetMeAPIView(APIView):
             request=GetMeResponseSerializer,
             responses={
                 200: GetMeResponseSerializer,
-                400: StandardErrorResponseSerializer, # Pakai yang global!
-                401: StandardErrorResponseSerializer, # Pakai yang global!
+                400: StandardErrorResponseSerializer,
+                401: StandardErrorResponseSerializer,
             }
         )
     def get(self, request):
@@ -127,8 +126,8 @@ class LogoutAPIView(APIView):
             request=LogoutRequestSerializer,
             responses={
                 200: LogoutSuccessSerializer,
-                400: StandardErrorResponseSerializer, # Pakai yang global!
-                401: StandardErrorResponseSerializer, # Pakai yang global!
+                400: StandardErrorResponseSerializer,
+                401: StandardErrorResponseSerializer,
             }
         )
 
