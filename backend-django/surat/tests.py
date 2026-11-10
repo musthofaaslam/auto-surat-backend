@@ -473,3 +473,199 @@ class IntentDetectionPipelineTestCase(TestCase):
         from surat.services.detect_intent import detect_intent_dynamically
         result = detect_intent_dynamically("pengantar skck kepolisian")
         self.assertEqual(result, "SP-SKC")
+
+
+class ConversationFlowStructuredStatesTestCase(TestCase):
+    """
+    Test suite untuk memvalidasi alur percakapan terstruktur 4-State:
+    State 1: Inisiasi Percakapan (Greeting resmi tanpa emoji)
+    State 2: Penanganan Parameter Tidak Lengkap (Hanya meminta atribut kurang, DILARANG menampilkan parameter yang sudah ada)
+    State 3: Konfirmasi data lengkap & Flag action_required == 'delivery_method'
+    State 4: Eksekusi pilihan metode pengiriman oleh pengguna
+    """
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = User.objects.create(
+            id="u-std-flow-test",
+            nama="Julian Sanchez",
+            nip_nim="INF24001",
+            role="STUDENT",
+            password="password123",
+        )
+        self.user.is_authenticated = True
+
+        self.surat_type = SuratType.objects.create(
+            kode_surat="SI-SUR",
+            nama_surat="surat izin survey dan observasi",
+            required_payload_fields=[
+                {"field": "instansi_tujuan", "label": "Instansi Tujuan"},
+                {"field": "lokasi_kegiatan", "label": "Lokasi Kegiatan"},
+                {"field": "tanggal_mulai", "label": "Tanggal Mulai"},
+            ],
+        )
+
+        self.thread = ChatThread.objects.create(
+            user=self.user,
+            title="Sesi Permohonan Surat Izin Survey",
+            document_type="SI-SUR",
+            status=ChatThread.ThreadStatus.ACTIVE,
+        )
+
+    def test_state_1_greeting_when_no_intent(self):
+        """Memastikan pesan pembuka baku digunakan saat obrolan tidak memuat intensi surat."""
+        from surat.services.chat_workflow import handle_incoming_chat_with_redis
+        session_data = {"slots": {}}
+        reply = handle_incoming_chat_with_redis(str(self.thread.id), "halo selamat pagi", session_data)
+        self.assertIn("Halo, saya adalah Asisten AI yang akan membantu Anda menyusun dokumen dan surat resmi.", reply)
+        self.assertIn("Silakan deskripsikan jenis surat yang ingin Anda buat beserta detail keperluannya.", reply)
+
+    def test_state_2_missing_entities_format_prohibits_existing_entities(self):
+        """
+        Memastikan State 2 hanya meminta parameter yang kurang,
+        dan DILARANG menampilkan parameter yang sudah terisi.
+        """
+        from surat.services.chat_workflow import handle_incoming_chat_with_redis
+        session_data = {
+            "intent": "SI-SUR",
+            "slots": {},
+        }
+
+        reply = handle_incoming_chat_with_redis(
+            str(self.thread.id),
+            "Instansi tujuan adalah Laboratorium Geologi",
+            session_data,
+        )
+        
+        # Harus memuat format baku State 2
+        self.assertIn("Untuk melanjutkan pembuatan surat surat izin survey dan observasi, Anda harus melampirkan informasi berikut:", reply)
+        self.assertIn("Lokasi Kegiatan", reply)
+        self.assertIn("Tanggal Mulai", reply)
+        
+        # DILARANG menampilkan parameter yang sudah ada
+        self.assertNotIn("Laboratorium Geologi", reply)
+        self.assertNotIn("Instansi Tujuan", reply)
+
+    def test_date_without_year_uses_current_year(self):
+        """
+        Kasus 1: Memastikan ketika user menginput tanggal tanpa tahun (misal '10 November'),
+        sistem tidak mengarang tahun 2024 melainkan menggunakan tahun berjalan saat ini.
+        """
+        from surat.services.chat_workflow import (
+            handle_incoming_chat_with_redis,
+            get_current_year,
+        )
+        session_data = {
+            "intent": "SI-SUR",
+            "slots": {
+                "instansi_tujuan": "Laboratorium Geologi",
+                "lokasi_kegiatan": "Bandung",
+            },
+        }
+
+        reply = handle_incoming_chat_with_redis(
+            str(self.thread.id),
+            "10 November",
+            session_data,
+        )
+        expected_date = f"{get_current_year():04d}-11-10"
+        self.assertEqual(session_data["slots"].get("tanggal_mulai"), expected_date)
+        self.assertIn(expected_date, reply)
+        self.assertNotIn("2024-11-10", reply)
+
+    def test_invalid_slot_type_date_for_instansi_returns_correction_message(self):
+        """
+        Kasus 2: Memastikan ketika user menginput tanggal saat diminta parameter non-tanggal
+        (seperti Instansi Tujuan), slot ditolak dan sistem mengembalikan pesan koreksi input salah.
+        """
+        from surat.services.chat_workflow import handle_incoming_chat_with_redis
+        session_data = {
+            "intent": "SI-SUR",
+            "slots": {
+                "tanggal_mulai": "2026-11-10",
+            },
+        }
+
+        reply = handle_incoming_chat_with_redis(
+            str(self.thread.id),
+            "15 Desember",
+            session_data,
+        )
+        self.assertNotIn("instansi_tujuan", session_data["slots"])
+        self.assertNotIn("lokasi_kegiatan", session_data["slots"])
+        # Pastikan tanggal_mulai yang sudah terisi sebelumnya tidak tertimpa
+        self.assertEqual(session_data["slots"].get("tanggal_mulai"), "2026-11-10")
+        self.assertIn("Input yang Anda masukkan tidak sesuai atau belum tepat.", reply)
+        self.assertIn("Instansi Tujuan", reply)
+        self.assertIn("Lokasi Kegiatan", reply)
+
+    def test_state_3_complete_summary_and_action_required_flag(self):
+        """
+        Memastikan State 3 merangkum seluruh atribut dan mengembalikan
+        flag action_required: 'delivery_method' pada API view.
+        """
+        # Set seluruh 3 slot terisi, namun chosen_destination belum terisi
+        AutoSuratSessionManager.save_session(
+            thread_id=str(self.thread.id),
+            state="COLLECTING_SLOTS",
+            intent="SI-SUR",
+            slots={
+                "instansi_tujuan": "PT Pertamina",
+                "lokasi_kegiatan": "Jakarta Pusat",
+                "tanggal_mulai": "2026-12-01",
+            },
+            missing_slots=[],
+        )
+
+        view = ChatSessionMessageAPIView.as_view()
+        request = self.factory.post(
+            f"/api/surat/chat/{self.thread.id}/",
+            {"message": "2026-12-01"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = view(request, thread_id=str(self.thread.id))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("action_required"), "delivery_method")
+        self.assertFalse(response.data.get("is_ready_to_draft"))
+        
+        reply = response.data.get("reply", "")
+        self.assertIn("Seluruh data yang dibutuhkan telah lengkap. Berikut adalah rincian informasi surat Anda:", reply)
+        self.assertIn("Instansi Tujuan: PT Pertamina", reply)
+        self.assertIn("Lokasi Kegiatan: Jakarta Pusat", reply)
+        self.assertIn("Tanggal Mulai: 2026-12-01", reply)
+        self.assertIn("Surat Anda akan dikirim melalui apa?", reply)
+
+    def test_state_4_execution_of_delivery_choice(self):
+        """
+        Memastikan ketika user memilih Email, sistem mencatat pilihan kanal pengiriman.
+        """
+        AutoSuratSessionManager.save_session(
+            thread_id=str(self.thread.id),
+            state="COLLECTING_SLOTS",
+            intent="SI-SUR",
+            slots={
+                "instansi_tujuan": "PT Pertamina",
+                "lokasi_kegiatan": "Jakarta Pusat",
+                "tanggal_mulai": "2026-12-01",
+            },
+            missing_slots=[],
+        )
+
+        view = ChatSessionMessageAPIView.as_view()
+        request = self.factory.post(
+            f"/api/surat/chat/{self.thread.id}/",
+            {"message": "Email: julian@pertamina.test"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = view(request, thread_id=str(self.thread.id))
+        self.assertEqual(response.status_code, 200)
+        
+        collected = response.data.get("collected_slots", {})
+        self.assertEqual(collected.get("chosen_destination"), "email")
+        self.assertEqual(collected.get("target_destination_address"), "julian@pertamina.test")
+        self.assertTrue(response.data.get("is_ready_to_draft"))
+        self.assertIsNone(response.data.get("action_required"))

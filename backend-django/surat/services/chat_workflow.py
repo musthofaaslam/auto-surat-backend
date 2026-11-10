@@ -1,9 +1,188 @@
 import re
 from typing import Dict, Any, Optional
 from surat.models import SuratType, ChatThread
-from .detect_intent import detect_intent_dynamically
+from .detect_intent import detect_intent_dynamically, STOP_WORDS, CATEGORY_WORDS
 from .route_intent import route_intent_with_ai
 from surat.agents.letter_agent import SuratDraftingAgent
+from surat.agents.prompts import (
+    CHAT_GREETING_MESSAGE,
+    format_state2_missing_parameters,
+    format_state3_complete_summary,
+    format_invalid_input_response,
+)
+
+
+MONTH_MAP = {
+    "januari": 1, "jan": 1, "january": 1,
+    "februari": 2, "feb": 2, "pebruari": 2, "february": 2,
+    "maret": 3, "mar": 3, "march": 3,
+    "april": 4, "apr": 4,
+    "mei": 5, "may": 5,
+    "juni": 6, "jun": 6, "june": 6,
+    "juli": 7, "jul": 7, "july": 7,
+    "agustus": 8, "agu": 8, "ags": 8, "aug": 8, "august": 8,
+    "september": 9, "sep": 9, "sept": 9,
+    "oktober": 10, "okt": 10, "oct": 10, "october": 10,
+    "november": 11, "nov": 11, "nopember": 11,
+    "desember": 12, "des": 12, "dec": 12, "december": 12,
+}
+
+DATE_ONLY_WORDS = set(MONTH_MAP.keys()) | {
+    "tanggal", "tgl", "bulan", "bln", "tahun", "thn",
+    "sampai", "sd", "hingga", "mulai", "selesai", "dari", "ke",
+    "hari", "senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu",
+}
+
+
+def get_current_year() -> int:
+    from datetime import date as dt_date
+    from django.utils import timezone
+
+    try:
+        return timezone.localdate().year
+    except Exception:
+        return dt_date.today().year
+
+
+def is_pure_date_expression(text: str) -> bool:
+    """
+    Mendeteksi apakah suatu teks murni merupakan ekspresi tanggal atau angka
+    tanpa konteks nama instansi, keperluan, posisi, atau teks deskriptif lainnya.
+    """
+    if not text or not str(text).strip():
+        return False
+    cleaned = str(text).strip().lower()
+
+    if re.match(r'^\d{1,4}[/-]\d{1,2}(?:[/-]\d{1,4})?$', cleaned):
+        return True
+
+    words = re.findall(r'[a-zA-Z]+', cleaned)
+    digits = re.findall(r'\d+', cleaned)
+
+    if len(words) == 0:
+        return True
+
+    if all(w in DATE_ONLY_WORDS for w in words) and (
+        len(digits) > 0 or any(w in MONTH_MAP for w in words)
+    ):
+        return True
+
+    return False
+
+
+def normalize_and_validate_date_slot(
+    raw_value: Any,
+    user_message: str,
+    has_attachments: bool = False,
+) -> Optional[str]:
+    """
+    Memvalidasi dan menormalisasi nilai slot bertipe tanggal ke format YYYY-MM-DD.
+    Apabila pengguna tidak menyebutkan tahun 4-digit pada pesannya, tahun otomatis
+    mengikuti tahun berjalan saat ini (misal 2026) agar LLM tidak mengarang tahun.
+    """
+    from datetime import date as dt_date
+
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    msg_lower = (user_message or "").lower()
+    if not has_attachments:
+        has_digit = bool(re.search(r'\d', msg_lower))
+        has_month_word = any(w in MONTH_MAP for w in re.findall(r'[a-zA-Z]+', msg_lower))
+        if not has_digit and not has_month_word:
+            return None
+
+    explicit_years = re.findall(r'\b((?:19|20)\d{2})\b', user_message or "")
+    user_specified_year = len(explicit_years) > 0 or has_attachments
+    current_year = get_current_year()
+
+    # 1. Format ISO YYYY-MM-DD
+    m_iso = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', text)
+    if m_iso:
+        year, month, day = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+        if not user_specified_year:
+            year = current_year
+        try:
+            dt_date(year, month, day)
+            return f"{year:04d}-{month:02d}-{day:02d}"
+        except ValueError:
+            return None
+
+    # 2. Format tanggal dengan nama bulan (contoh: "10 November" atau "10 November 2026")
+    m_named = re.search(r'\b(\d{1,2})\s+([a-zA-Z]+)(?:\s+(\d{4}))?\b', text)
+    if m_named and m_named.group(2).lower() in MONTH_MAP:
+        day = int(m_named.group(1))
+        month = MONTH_MAP[m_named.group(2).lower()]
+        year = int(m_named.group(3)) if (m_named.group(3) and user_specified_year) else current_year
+        try:
+            dt_date(year, month, day)
+            return f"{year:04d}-{month:02d}-{day:02d}"
+        except ValueError:
+            return None
+
+    # 3. Format numerik DD/MM/YYYY atau DD-MM-YYYY atau DD/MM
+    m_num = re.search(r'\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b', text)
+    if m_num:
+        day = int(m_num.group(1))
+        month = int(m_num.group(2))
+        if m_num.group(3) and user_specified_year:
+            year = int(m_num.group(3))
+            if year < 100:
+                year += 2000
+        else:
+            year = current_year
+        try:
+            dt_date(year, month, day)
+            return f"{year:04d}-{month:02d}-{day:02d}"
+        except ValueError:
+            return None
+
+    return None
+
+
+def validate_and_normalize_slot(
+    field_def: Dict[str, Any],
+    raw_value: Any,
+    user_message: str,
+    has_attachments: bool = False,
+) -> Optional[str]:
+    """
+    Memvalidasi kesesuaian tipe antara definisi parameter (date vs string)
+    dengan nilai yang diekstrak serta menormalisasi tahun pada tanggal.
+    """
+    if raw_value is None:
+        return None
+    field_name = str(field_def.get("field") or "").strip()
+    field_type = str(field_def.get("type") or "string").strip().lower()
+
+    cleaned_val = sanitize_extracted_slot(field_name, raw_value)
+    if not isinstance(cleaned_val, str):
+        cleaned_val = str(cleaned_val).strip()
+    else:
+        cleaned_val = cleaned_val.strip()
+
+    if not cleaned_val or cleaned_val.lower() in ("null", "none", "tidak disebutkan", "-"):
+        return None
+
+    is_date_field = field_type == "date" or field_name.startswith("tanggal_")
+    if is_date_field:
+        return normalize_and_validate_date_slot(
+            cleaned_val,
+            user_message=user_message,
+            has_attachments=has_attachments,
+        )
+
+    if is_pure_date_expression(cleaned_val):
+        return None
+    if not has_attachments and is_pure_date_expression(user_message):
+        return None
+    if len(cleaned_val) < 2:
+        return None
+
+    return cleaned_val
 
 
 def get_effective_required_fields(surat_type) -> list:
@@ -54,7 +233,7 @@ def handle_incoming_chat_with_redis(
     # 3. KASUS A: Belum ada intent yang terkunci (Sesi baru)
     if not active_intent:
         if not detected_kode_surat:
-            return "Mohon maaf, jenis surat yang Anda maksud belum dikenali. Silakan ketik nama surat dengan jelas."
+            return CHAT_GREETING_MESSAGE
         
         # Simpan intent ke Redis & update document_type serta title di PostgreSQL
         surat_obj = SuratType.objects.get(kode_surat=detected_kode_surat)
@@ -67,10 +246,7 @@ def handle_incoming_chat_with_redis(
         
         # Langsung ekstrak apabila di kalimat pertama mahasiswa sudah menyebutkan sebagian parameter atau melampirkan berkas
         slot_reply = process_slot_filling_redis(cleaned_msg, session_data, is_initial_turn=True, attachments=attachments)
-        return (
-            f"Baik, kita akan memproses **{surat_obj.nama_surat}** ({detected_kode_surat}).\n\n"
-            f"{slot_reply}"
-        )
+        return slot_reply
 
     # 4. KASUS B: Intent sudah terkunci, tapi user mendadak menyebutkan intent BARU
     if detected_kode_surat and detected_kode_surat != active_intent:
@@ -81,7 +257,7 @@ def handle_incoming_chat_with_redis(
         session_data["is_waiting_for_switch_confirmation"] = True
         
         return (
-            f"⚠️ Sesi saat ini sedang memproses **{old_surat.nama_surat}**. "
+            f"Perhatian: Sesi saat ini sedang memproses **{old_surat.nama_surat}**. "
             f"Apakah Anda ingin membatalkan draf tersebut dan beralih membuat **{new_surat.nama_surat}**? "
             f"\n\n(Ketik **'Ya'** untuk beralih atau **'Tidak'** untuk melanjutkan draf sebelumnya)"
         )
@@ -150,18 +326,40 @@ def process_slot_filling_redis(
         if not current_slots.get("chosen_destination"):
             if "email" in msg_lower:
                 current_slots["chosen_destination"] = "email"
+                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', user_message)
+                if email_match:
+                    current_slots["target_destination_address"] = email_match.group(0)
+                    session_data["slots"] = current_slots
+                    return (
+                        f"Preferensi pengiriman disimpan (Email: {current_slots['target_destination_address']}).\n\n"
+                        f"Semua data telah lengkap dan tervalidasi. Silakan klik tombol 'Lanjutkan & Simpan Draf Permohonan' di bawah "
+                        f"atau ketik 'Lanjut' untuk memproses draf surat ke sistem."
+                    )
                 session_data["slots"] = current_slots
-                return "Baik, terpilih **Email**. Mohon masukkan alamat email tujuan Anda saat ini:"
+                return "Pengiriman dipilih melalui Email. Mohon masukkan alamat email tujuan pengiriman:"
             elif "telegram" in msg_lower:
                 current_slots["chosen_destination"] = "telegram"
+                telegram_match = re.search(r'(@?\w{5,}|\d{6,})', user_message.replace("telegram", "").strip())
+                if telegram_match:
+                    current_slots["target_destination_address"] = telegram_match.group(0)
+                    session_data["slots"] = current_slots
+                    return (
+                        f"Preferensi pengiriman disimpan (Telegram: {current_slots['target_destination_address']}).\n\n"
+                        f"Semua data telah lengkap dan tervalidasi. Silakan klik tombol 'Lanjutkan & Simpan Draf Permohonan' di bawah "
+                        f"atau ketik 'Lanjut' untuk memproses draf surat ke sistem."
+                    )
                 session_data["slots"] = current_slots
-                return "Baik, terpilih **Telegram**. Mohon masukkan nomor **Chat ID Telegram** Anda:"
+                return "Pengiriman dipilih melalui Telegram. Mohon masukkan nomor Chat ID atau username Telegram tujuan pengiriman:"
             else:
-                return (
-                    "🎉 **Semua data surat sudah lengkap!**\n\n"
-                    "Terakhir, dokumen PDF hasil jadi nanti mau dikirimkan ke mana setelah disetujui dosen?\n"
-                    "👉 Silakan ketik: **Email** atau **Telegram**"
-                )
+                # STATE 3 FORMAT: Rangkuman lengkap dan pertanyaan pengiriman
+                slots_summary = [
+                    {
+                        "label": str(item.get("label") or item.get("field")).strip(),
+                        "value": str(current_slots.get(item.get("field"), "-")).strip()
+                    }
+                    for item in required_fields
+                ]
+                return format_state3_complete_summary(slots_summary)
         
         # Jika chosen_destination sudah ada tapi target tujuannya belum terisi
         if current_slots.get("chosen_destination") and not current_slots.get("target_destination_address"):
@@ -169,100 +367,125 @@ def process_slot_filling_redis(
             session_data["slots"] = current_slots
             return (
                 f"Preferensi pengiriman disimpan ({current_slots['chosen_destination']}: {current_slots['target_destination_address']}).\n\n"
-                f"Semua data telah lengkap dan tervalidasi. Silakan klik tombol **'Lanjutkan & Simpan Draf Permohonan'** di bawah "
-                f"atau ketik **'Lanjut'** untuk memproses draf surat ke sistem."
+                f"Semua data telah lengkap dan tervalidasi. Silakan klik tombol 'Lanjutkan & Simpan Draf Permohonan' di bawah "
+                f"atau ketik 'Lanjut' untuk memproses draf surat ke sistem."
             )
 
         return (
-            f"Seluruh data permohonan **{surat_type.nama_surat}** dan preferensi pengiriman "
+            f"Seluruh data permohonan {surat_type.nama_surat} dan preferensi pengiriman "
             f"({current_slots.get('chosen_destination')}: {current_slots.get('target_destination_address')}) "
             f"telah lengkap dan siap dibuatkan draf surat!\n\n"
-            f"Silakan klik tombol **'Lanjutkan & Simpan Draf Permohonan'** di bawah atau ketik **'Lanjut'** untuk memproses permohonan."
+            f"Silakan klik tombol 'Lanjutkan & Simpan Draf Permohonan' di bawah atau ketik 'Lanjut' untuk memproses permohonan."
         )
 
     # 1. GUNAKAN AI / EXTRACTOR UNTUK MENANGKAP SLOT DARI PESAN BEBAS USER & BERKAS LAMPIRAN
     # Menggunakan SuratDraftingAgent atau fungsi helper ekstraksi slot berstandar LLM
-    try:
-        agent = SuratDraftingAgent()
-        # Meminta AI mengekstrak data apa saja yang relevan dari pesan bebas user dan dokumen lampiran saat ini
-        extraction_result = agent.extract_slots_from_text(
-            user_prompt_context=user_message,
-            kode_surat=surat_type.kode_surat,
-            required_fields=required_fields,
-            current_slots=None if is_initial_turn else current_slots,
-            attachments=attachments,
-        )
-        extracted_data = getattr(extraction_result, "extracted_slots", {}) or {}
-        # Pada giliran pertama (saat user baru menyebutkan jenis surat saja seperti "Saya mau buat surat magang"),
-        # cegah fallback darurat memasukkan kalimat pembuka ke dalam slot pertama jika bukan nilai faktual
-        if is_initial_turn and len(extracted_data) == 1 and not attachments:
-            only_val = str(next(iter(extracted_data.values()))).strip()
-            if only_val.lower() == user_message.strip().lower():
-                extracted_data = {}
-    except Exception:
-        extracted_data = {}
-        if not is_initial_turn and not attachments:
-            # Fallback darurat jika ekstraksi AI gagal pada giliran tanya-jawab slot
-            for item in required_fields:
-                fk = item.get("field")
-                if fk not in current_slots or not current_slots[fk]:
-                    extracted_data[fk] = user_message
-                    break
+    intent_noise_words = (
+        STOP_WORDS
+        | CATEGORY_WORDS
+        | set(re.findall(r'\w+', surat_type.nama_surat.lower()))
+        | {surat_type.kode_surat.lower(), "survei", "survey", "transkip", "transkrip", "skripsi", "riset"}
+    )
+    extra_tokens = [
+        tk for tk in re.findall(r'\w+', user_message.lower())
+        if tk not in intent_noise_words
+    ]
+    is_pure_intent_declaration = is_initial_turn and not attachments and len(extra_tokens) == 0
 
-    # 2. TERAPKAN SANITASI & AKUMULASI KE REDIS SLOTS (Accumulative Merge)
+    if is_pure_intent_declaration:
+        extracted_data = {}
+    else:
+        try:
+            agent = SuratDraftingAgent()
+            # Meminta AI mengekstrak data apa saja yang relevan dari pesan bebas user dan dokumen lampiran saat ini
+            extraction_result = agent.extract_slots_from_text(
+                user_prompt_context=user_message,
+                kode_surat=surat_type.kode_surat,
+                required_fields=required_fields,
+                current_slots=None if is_initial_turn else current_slots,
+                attachments=attachments,
+            )
+            extracted_data = getattr(extraction_result, "extracted_slots", {}) or {}
+            # Pada giliran pertama (saat user baru menyebutkan jenis surat saja seperti "Saya mau buat surat magang"),
+            # cegah fallback darurat memasukkan kalimat pembuka ke dalam slot pertama jika bukan nilai faktual
+            if is_initial_turn and len(extracted_data) == 1 and not attachments:
+                only_val = str(next(iter(extracted_data.values()))).strip()
+                if only_val.lower() == user_message.strip().lower():
+                    extracted_data = {}
+        except Exception:
+            extracted_data = {}
+            if not is_initial_turn and not attachments:
+                # Fallback darurat jika ekstraksi AI gagal pada giliran tanya-jawab slot
+                for item in required_fields:
+                    fk = item.get("field")
+                    if fk not in current_slots or not current_slots[fk]:
+                        extracted_data[fk] = user_message
+                        break
+
+    # 2. TERAPKAN VALIDASI, SANITASI & AKUMULASI KE REDIS SLOTS (Accumulative Merge)
+    field_map = {
+        str(item.get("field")): item
+        for item in required_fields
+        if isinstance(item, dict) and item.get("field")
+    }
+    missing_fields_before = {
+        str(item.get("field"))
+        for item in required_fields
+        if not (item.get("field") in current_slots and bool(current_slots[item.get("field")]))
+    }
+
+    has_attachments = bool(attachments and len(attachments) > 0)
+    newly_filled_missing_count = 0
+    candidate_updates: Dict[str, str] = {}
+
     for field_key, raw_val in extracted_data.items():
-        if raw_val:
-            # Bersihkan dari kata tugas/noise menggunakan sanitizer regex kita
-            cleaned_val = sanitize_extracted_slot(field_key, raw_val)
-            # Hanya simpan jika slot tersebut memang bagian dari required fields
-            if any(item.get("field") == field_key for item in required_fields):
-                current_slots[field_key] = cleaned_val
+        if field_key in field_map and raw_val:
+            validated_val = validate_and_normalize_slot(
+                field_def=field_map[field_key],
+                raw_value=raw_val,
+                user_message=user_message,
+                has_attachments=has_attachments,
+            )
+            if validated_val:
+                candidate_updates[field_key] = validated_val
+                if field_key in missing_fields_before:
+                    newly_filled_missing_count += 1
+
+    if is_initial_turn or newly_filled_missing_count > 0:
+        for fk, val in candidate_updates.items():
+            if fk in missing_fields_before or not current_slots.get(fk):
+                current_slots[fk] = val
 
     session_data["slots"] = current_slots
 
-    # 3. Render checklist status kelengkapan terbaru
-    checklist_lines, is_complete, next_target_label = generate_checklist_status_response(surat_type, current_slots)
-    formatted_checklist = "\n".join(checklist_lines)
-    
-    main_slots_complete_now = bool(required_fields) and all(
-        item.get("field") in current_slots and bool(current_slots[field_key := item.get("field")])
-        for item in required_fields
-    )
-    
-    if main_slots_complete_now:
-        return (
-            f"{formatted_checklist}\n\n"
-            "🎉 **Semua data untuk surat ini sudah lengkap!**\n"
-            "Terakhir, dokumen PDF hasil jadi nanti mau dikirimkan ke mana setelah disetujui?\n"
-            "👉 Silakan ketik: **Email** atau **Telegram**"
-        )
-        
-    else:
-        return f"{formatted_checklist}\n\nMohon informasikan data untuk: **{next_target_label}**"
+    # 3. Evaluasi kelengkapan parameter (State 2 vs State 3)
+    missing_items = [
+        item for item in required_fields
+        if not (item.get("field") in current_slots and bool(current_slots[item.get("field")]))
+    ]
 
-def generate_checklist_status_response(surat_type, current_slots: dict):
-    required_fields = get_effective_required_fields(surat_type)
-    checklist_lines = [f"📋 **Status Kelengkapan: {surat_type.nama_surat}**"]
-    
-    all_complete = True
-    next_target_label = None
-    
-    for item in required_fields:
-        field_key = item.get("field")
-        field_label = item.get("label", field_key) 
-        
-        is_filled = field_key in current_slots and bool(current_slots[field_key])
-        
-        if is_filled:
-            value = current_slots[field_key]
-            checklist_lines.append(f"✅ **{field_label}**: {value}")
-        else:
-            checklist_lines.append(f"❌ **{field_label}**: *(Belum diisi)*")
-            all_complete = False
-            if not next_target_label:
-                next_target_label = field_label  
-                
-    return checklist_lines, all_complete, next_target_label
+    if missing_items:
+        missing_labels = [
+            str(item.get("label") or item.get("field")).strip()
+            for item in missing_items
+        ]
+        if not is_initial_turn and newly_filled_missing_count == 0:
+            return format_invalid_input_response(surat_type.nama_surat, missing_labels)
+
+        # STATE 2: Penanganan Parameter Tidak Lengkap (Missing Entities)
+        # LLM DILARANG menampilkan parameter yang sudah ada.
+        # LLM hanya boleh meminta parameter yang kurang dengan format baku:
+        return format_state2_missing_parameters(surat_type.nama_surat, missing_labels)
+
+    # STATE 3: Jika seluruh parameter di skema telah terpenuhi
+    slots_summary = [
+        {
+            "label": str(item.get("label") or item.get("field")).strip(),
+            "value": str(current_slots.get(item.get("field"), "-")).strip()
+        }
+        for item in required_fields
+    ]
+    return format_state3_complete_summary(slots_summary)
 
 def sanitize_extracted_slot(field_name: str, raw_value: Any) -> Any:
     """

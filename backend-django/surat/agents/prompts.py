@@ -345,3 +345,70 @@ def build_redraft_with_memory_user_prompt(
         student_metadata_section=student_section,
         user_prompt_context=cleaned_context,
     )
+
+
+# =========================================================================
+# CHAT CONVERSATION FLOW PROMPTS (STATE 1, 2, 3)
+# =========================================================================
+
+CHAT_CONVERSATION_SYSTEM_PROMPT = """Anda adalah Asisten AI yang bertugas membantu mahasiswa menyusun dokumen dan surat dinas resmi perguruan tinggi.
+
+ATURAN STRUKTUR RESPON WAJIB:
+1. STATE 1 - INISIASI PERCAKAPAN:
+   Saat obrolan dimulai atau konteks masih kosong, gunakan format baku:
+   "Halo, saya adalah Asisten AI yang akan membantu Anda menyusun dokumen dan surat resmi. Silakan deskripsikan jenis surat yang ingin Anda buat beserta detail keperluannya."
+
+2. STATE 2 - PENANGANAN PARAMETER TIDAK LENGKAP:
+   Jika ada parameter yang belum terpenuhi, DILARANG menampilkan parameter yang sudah ada. Hanya minta parameter yang kurang dengan format baku:
+   "Untuk melanjutkan pembuatan surat [Nama Jenis Surat], Anda harus melampirkan informasi berikut:\n\n[Nama Parameter Kurang 1]\n\n[Nama Parameter Kurang 2]"
+
+3. STATE 3 - KONFIRMASI DAN METODE PENGIRIMAN:
+   Jika seluruh parameter telah lengkap, rangkum seluruh data yang ditangkap diikuti dengan pertanyaan pengiriman dengan format baku:
+   "Seluruh data yang dibutuhkan telah lengkap. Berikut adalah rincian informasi surat Anda:\n\n[Parameter 1]: [Nilai 1]\n\n[Parameter 2]: [Nilai 2]\n\nSurat Anda akan dikirim melalui apa?"
+
+4. ATURAN INTEGRITAS TATA NASKAH:
+   DILARANG KERAS menggunakan emoji atau emotikon dalam bentuk apa pun. Gunakan bahasa formal, baku, dan lugas.
+"""
+
+CHAT_GREETING_MESSAGE = (
+    "Halo, saya adalah Asisten AI yang akan membantu Anda menyusun dokumen dan surat resmi. "
+    "Silakan deskripsikan jenis surat yang ingin Anda buat beserta detail keperluannya."
+)
+
+
+def format_state2_missing_parameters(nama_surat: str, missing_labels: List[str]) -> str:
+    """
+    Format baku State 2: hanya meminta parameter yang kurang,
+    DILARANG menampilkan parameter yang sudah ada.
+    """
+    items_text = "\n\n".join(missing_labels)
+    return (
+        f"Untuk melanjutkan pembuatan surat {nama_surat}, Anda harus melampirkan informasi berikut:\n\n"
+        f"{items_text}"
+    )
+
+
+def format_state3_complete_summary(slots_summary: List[Dict[str, str]]) -> str:
+    """
+    Format baku State 3: merangkum seluruh data yang ditangkap dan menanyakan metode pengiriman.
+    """
+    summary_lines = [f"{item['label']}: {item['value']}" for item in slots_summary]
+    items_text = "\n\n".join(summary_lines)
+    return (
+        "Seluruh data yang dibutuhkan telah lengkap. Berikut adalah rincian informasi surat Anda:\n\n"
+        f"{items_text}\n\n"
+        "Surat Anda akan dikirim melalui apa?"
+    )
+
+
+def format_invalid_input_response(nama_surat: str, missing_labels: List[str]) -> str:
+    """
+    Format respon ketika pengguna memasukkan data yang tidak valid atau tidak sesuai
+    dengan parameter yang diminta.
+    """
+    items_text = "\n\n".join(missing_labels)
+    return (
+        "Input yang Anda masukkan tidak sesuai atau belum tepat. "
+        f"Mohon kirimkan informasi yang benar untuk parameter berikut agar permohonan surat {nama_surat} dapat diproses:\n\n"
+        f"{items_text}"
+    )

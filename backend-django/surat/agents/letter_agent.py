@@ -1184,8 +1184,17 @@ class SuratDraftingAgent:
                     break
 
         extracted: Dict[str, Any] = {}
+        llm_invoked_successfully = False
         if self.api_key or self._client is not None:
             try:
+                from datetime import date as dt_date
+                from django.utils import timezone
+
+                try:
+                    current_date = timezone.localdate()
+                except Exception:
+                    current_date = dt_date.today()
+
                 normalized_kode = "".join(ch for ch in (kode_surat or "").upper() if ch.isalnum()) or "Custom"
                 payload_schema_cls = build_dynamic_payload_schema(
                     f"ChatSlot{normalized_kode}Schema",
@@ -1193,11 +1202,11 @@ class SuratDraftingAgent:
                 )
 
                 target_hint = ""
-                if next_missing_field:
+                if next_missing_field and current_slots is not None:
                     target_hint = (
                         f"\nKonteks pertanyaan saat ini sedang meminta mahasiswa mengisi field "
-                        f"'{next_missing_field.get('field')}' ({next_missing_field.get('label', '')}). "
-                        f"Apabila pesan mahasiswa berupa jawaban langsung/singkat yang menjawab field tersebut, "
+                        f"'{next_missing_field.get('field')}' ({next_missing_field.get('label', '')}, tipe: {next_missing_field.get('type', 'string')}). "
+                        f"Apabila pesan mahasiswa berupa jawaban yang sesuai dan valid untuk tipe field tersebut, "
                         f"petakan nilainya ke field '{next_missing_field.get('field')}'."
                     )
 
@@ -1211,15 +1220,18 @@ class SuratDraftingAgent:
                     )
 
                 extraction_prompt = (
+                    f"Tanggal referensi sistem hari ini: {current_date.isoformat()} (Tahun berjalan saat ini: {current_date.year}).\n"
                     f"Ekstrak informasi faktual dari pesan mahasiswa dan dokumen lampiran (jika ada) berikut untuk permohonan surat '{kode_surat}'.\n"
                     f"Pesan Mahasiswa: \"{text_clean}\"\n"
                     f"Slot yang sudah terisi sebelumnya: {json.dumps(existing_slots, ensure_ascii=False)}"
                     f"{target_hint}"
                     f"{attachment_hint}\n\n"
                     "ATURAN KETAT:\n"
-                    "1. Hanya isi field yang datanya benar-benar disebutkan di dalam Pesan Mahasiswa atau Dokumen Lampiran.\n"
+                    "1. Hanya isi field yang datanya benar-benar disebutkan di dalam Pesan Mahasiswa saat ini atau Dokumen Lampiran. Jangan menyalin ulang nilai dari Slot yang sudah terisi sebelumnya jika tidak disebutkan pada Pesan Mahasiswa saat ini.\n"
                     "2. Untuk field lain yang tidak disebutkan di dalam pesan maupun lampiran, WAJIB bernilai null.\n"
-                    "3. Jangan mengarang atau menebak data yang tidak ada."
+                    "3. Jangan mengarang atau menebak data yang tidak ada.\n"
+                    f"4. ATURAN TANGGAL: Apabila pengguna menyebutkan tanggal dan bulan tanpa mencantumkan tahun (contoh: '10 November' atau '15 Desember'), WAJIB gunakan tahun berjalan saat ini yaitu {current_date.year} dalam format YYYY-MM-DD. Dilarang keras mengarang tahun 2024 atau tahun lain.\n"
+                    "5. ATURAN VALIDASI TIPE: Dilarang memetakan input yang murni berupa tanggal atau angka saja ke dalam field non-tanggal (seperti instansi_tujuan, tujuan_keperluan, posisi_dilamar, mata_kuliah, judul_tugas_akhir, atau nama_beasiswa). Sebaliknya, dilarang memetakan nama instansi atau teks biasa yang bukan tanggal ke dalam field bertipe date. Jika pesan mahasiswa tidak sesuai dengan tipe parameter yang diminta, kembalikan null untuk semua field."
                 )
 
                 parsed_model = self._invoke_structured_llm(
@@ -1231,9 +1243,14 @@ class SuratDraftingAgent:
                     response_schema=payload_schema_cls,
                     attachments=attachments,
                 )
+                llm_invoked_successfully = True
                 raw_dump = parsed_model.model_dump(mode="json")
                 for k, v in raw_dump.items():
-                    if v is not None and str(v).strip() != "":
+                    if (
+                        v is not None
+                        and str(v).strip() != ""
+                        and str(v).strip().lower() not in ("null", "none", "tidak disebutkan", "-")
+                    ):
                         extracted[k] = v
             except Exception as exc:
                 logger.warning(
@@ -1242,7 +1259,7 @@ class SuratDraftingAgent:
                     exc,
                 )
 
-        if not extracted and next_missing_field and not attachments:
+        if not llm_invoked_successfully and not extracted and next_missing_field and not attachments:
             fk = str(next_missing_field["field"])
             extracted[fk] = text_clean
 

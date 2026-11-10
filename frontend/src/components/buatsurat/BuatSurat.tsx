@@ -26,6 +26,8 @@ import {
   Building2,
   GraduationCap,
   ChevronDown,
+  Mail,
+  Send,
 } from 'lucide-react';
 
 interface ChatMessageItem {
@@ -33,7 +35,64 @@ interface ChatMessageItem {
   sender: 'user' | 'assistant' | 'system';
   text: string;
   timestamp: string;
+  action_required?: 'delivery_method' | null;
+  isStreaming?: boolean;
 }
+
+const TypewriterText: React.FC<{
+  content: string;
+  isStreaming?: boolean;
+  onFinish?: () => void;
+  onTick?: () => void;
+}> = ({ content, isStreaming, onFinish, onTick }) => {
+  const [displayedText, setDisplayedText] = useState(isStreaming ? '' : content);
+  const [isTyping, setIsTyping] = useState(Boolean(isStreaming));
+
+  const onFinishRef = useRef(onFinish);
+  const onTickRef = useRef(onTick);
+
+  useEffect(() => {
+    onFinishRef.current = onFinish;
+    onTickRef.current = onTick;
+  });
+
+  useEffect(() => {
+    if (!isStreaming) {
+      setDisplayedText(content);
+      setIsTyping(false);
+      return;
+    }
+
+    let currentIndex = 0;
+    const totalLength = content.length;
+    setDisplayedText('');
+    setIsTyping(true);
+
+    const interval = setInterval(() => {
+      currentIndex += 2;
+      if (currentIndex >= totalLength) {
+        setDisplayedText(content);
+        setIsTyping(false);
+        clearInterval(interval);
+        if (onFinishRef.current) onFinishRef.current();
+      } else {
+        setDisplayedText(content.slice(0, currentIndex));
+        if (onTickRef.current) onTickRef.current();
+      }
+    }, 14);
+
+    return () => clearInterval(interval);
+  }, [content, isStreaming]);
+
+  return (
+    <span>
+      {displayedText}
+      {isTyping && (
+        <span className="inline-block w-1.5 h-3.5 bg-blue-600 ml-0.5 animate-pulse align-middle" />
+      )}
+    </span>
+  );
+};
 
 interface BuatSuratProps {
   suratTypes: SuratType[];
@@ -133,21 +192,22 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
 
       const restoredMsgs: ChatMessageItem[] =
         data.messages && data.messages.length > 0
-          ? data.messages.map((m: any) => ({
+          ? data.messages.map((m: any, idx: number) => ({
               id: m.id,
               sender: m.sender,
               text: m.text,
               timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              action_required: idx === data.messages.length - 1 ? (data.action_required || null) : null,
             }))
           : [
               {
-                id: 'welcome',
+                id: `welcome-${Date.now()}`,
                 sender: 'assistant',
                 text:
-                  'Halo. Saya Asisten Cerdas Persuratan Dinas Akademik (Agentic AI Level 2). ' +
-                  'Silakan jelaskan surat dinas yang Anda perlukan beserta tujuannya dalam bahasa alami. ' +
-                  'Saya akan mengekstrak atribut wajib dan memvalidasi kelengkapannya secara otomatis.',
+                  'Halo, saya adalah Asisten AI yang akan membantu Anda menyusun dokumen dan surat resmi. ' +
+                  'Silakan deskripsikan jenis surat yang ingin Anda buat beserta detail keperluannya.',
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                isStreaming: true,
               },
             ];
 
@@ -180,13 +240,13 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
       sessionStorage.setItem('active_chat_thread_id', res.thread_id);
       setChatMessages([
         {
-          id: 'welcome',
+          id: `welcome-${Date.now()}`,
           sender: 'assistant',
           text:
-            'Halo. Saya Asisten Cerdas Persuratan Dinas Akademik (Agentic AI Level 2). ' +
-            'Silakan jelaskan surat dinas yang Anda perlukan beserta tujuannya dalam bahasa alami. ' +
-            'Saya akan mengekstrak atribut wajib dan memvalidasi kelengkapannya secara otomatis.',
+            'Halo, saya adalah Asisten AI yang akan membantu Anda menyusun dokumen dan surat resmi. ' +
+            'Silakan deskripsikan jenis surat yang ingin Anda buat beserta detail keperluannya.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isStreaming: true,
         },
       ]);
       setChatCollectedSlots({});
@@ -196,10 +256,11 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     } catch {
       setChatMessages([
         {
-          id: 'err-init',
+          id: `err-init-${Date.now()}`,
           sender: 'assistant',
           text: 'Gagal menginisialisasi sesi AI. Anda tetap dapat menggunakan tab Formulir Surat.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isStreaming: true,
         },
       ]);
     } finally {
@@ -207,11 +268,12 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     }
   };
 
-  const handleSendChatMessage = async () => {
-    if (!chatInput.trim() && chatAttachments.length === 0) return;
+  const handleSendChatMessage = async (presetText?: string) => {
+    const rawText = typeof presetText === 'string' ? presetText : chatInput;
+    if (!rawText.trim() && chatAttachments.length === 0) return;
     if (!chatThreadId) return;
 
-    const userText = chatInput.trim();
+    const userText = rawText.trim();
 
     if (
       chatIsReadyToDraft &&
@@ -230,7 +292,9 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     };
 
     setChatMessages((prev) => [...prev, newMsg]);
-    setChatInput('');
+    if (typeof presetText !== 'string') {
+      setChatInput('');
+    }
     setIsChatLoading(true);
 
     try {
@@ -260,6 +324,8 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
         sender: 'assistant',
         text: resp.reply,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        action_required: resp.action_required || null,
+        isStreaming: true,
       };
       setChatMessages((prev) => [...prev, botMsg]);
     } catch (err: any) {
@@ -788,7 +854,55 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
                           : 'bg-white border border-slate-200/90 text-slate-900 rounded-tl-none shadow-2xs'
                       }`}
                     >
-                      {msg.text}
+                      {isUser ? (
+                        msg.text
+                      ) : (
+                        <TypewriterText
+                          content={msg.text}
+                          isStreaming={msg.isStreaming}
+                          onTick={() => {
+                            if (chatMessagesContainerRef.current) {
+                              chatMessagesContainerRef.current.scrollTop =
+                                chatMessagesContainerRef.current.scrollHeight;
+                            }
+                          }}
+                          onFinish={() => {
+                            setChatMessages((prev) =>
+                              prev.map((m) =>
+                                m.id === msg.id ? { ...m, isStreaming: false } : m
+                              )
+                            );
+                            if (chatMessagesContainerRef.current) {
+                              chatMessagesContainerRef.current.scrollTop =
+                                chatMessagesContainerRef.current.scrollHeight;
+                            }
+                          }}
+                        />
+                      )}
+
+                      {/* State 3 Action Required: Interactive Delivery Method Buttons */}
+                      {!isUser && msg.action_required === 'delivery_method' && !msg.isStreaming && (
+                        <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={isChatLoading || Boolean(chatCollectedSlots.chosen_destination)}
+                            onClick={() => handleSendChatMessage('Email')}
+                            className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium shadow-2xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Mail className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Email</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isChatLoading || Boolean(chatCollectedSlots.chosen_destination)}
+                            onClick={() => handleSendChatMessage('Telegram')}
+                            className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium shadow-2xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Send className="w-3.5 h-3.5 text-sky-600" />
+                            <span>Telegram</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <div
                       className={`text-[10px] text-slate-400 font-normal px-1 ${
@@ -806,30 +920,6 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
               <div className="flex items-center space-x-2 text-xs font-normal text-slate-500 py-2">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
                 <span>Agen AI menganalisa naskah dinas...</span>
-              </div>
-            )}
-
-            {/* Slot Memory Telemetry Checklist */}
-            {Object.keys(chatCollectedSlots).length > 0 && (
-              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-2 max-w-xl">
-                <div className="text-[11px] font-semibold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                  <span>Atribut Yang Telah Terdeteksi</span>
-                  <span className="text-[10px] text-slate-400 font-normal">
-                    Format: {chatDetectedIntent || selectedKodeSurat}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {Object.entries(chatCollectedSlots).map(([key, val]) => (
-                    <div key={key} className="p-2 rounded bg-slate-50 border border-slate-100">
-                      <span className="text-[10px] font-semibold text-slate-500 block uppercase">
-                        {key.replace(/_/g, ' ')}
-                      </span>
-                      <span className="font-normal text-slate-800 truncate block">
-                        {String(val)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 

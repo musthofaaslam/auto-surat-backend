@@ -382,6 +382,7 @@ class ChatThreadCreateAPIView(APIView):
         return Response({
             "status": "success",
             "message": "Sesi chat (thread) berhasil diinisialisasi.",
+            "initial_message": "Halo, saya adalah Asisten AI yang akan membantu Anda menyusun dokumen dan surat resmi. Silakan deskripsikan jenis surat yang ingin Anda buat beserta detail keperluannya.",
             "thread_id": str(thread.id),
             "title": thread.title,
             "document_type": thread.document_type,
@@ -465,12 +466,16 @@ class ChatSessionMessageAPIView(APIView):
 
         # 4. Jika semua required fields sudah lengkap, berikan sinyal ke frontend 
         # bahwa sesi siap diconvert menjadi SuratRequest (Fase Drafting Agent).
-        surat_is_complete = False
-        if intent and required_fields:
-            surat_is_complete = all(
-                item.get("field") in slots and bool(slots[item.get("field")])
-                for item in required_fields
-            )
+        main_slots_complete = bool(intent and required_fields) and all(
+            item.get("field") in slots and bool(slots[item.get("field")])
+            for item in required_fields
+        )
+
+        surat_is_complete = main_slots_complete and bool(slots.get("chosen_destination")) and bool(slots.get("target_destination_address"))
+
+        action_required = None
+        if main_slots_complete and not slots.get("chosen_destination"):
+            action_required = "delivery_method"
 
         missing_fields = [
             item.get("field") for item in required_fields
@@ -482,6 +487,7 @@ class ChatSessionMessageAPIView(APIView):
                 "status": "ready_to_draft",
                 "state": "READY_TO_DRAFT",
                 "is_ready_to_draft": True,
+                "action_required": None,
                 "intent": intent,
                 "detected_intent": intent,
                 "kode_surat": intent,
@@ -496,6 +502,7 @@ class ChatSessionMessageAPIView(APIView):
             "status": "success",
             "state": "COLLECTING_SLOTS",
             "is_ready_to_draft": False,
+            "action_required": action_required,
             "intent": intent,
             "detected_intent": intent,
             "kode_surat": intent,
@@ -531,12 +538,16 @@ class ChatSessionMessageAPIView(APIView):
             except SuratType.DoesNotExist:
                 pass
 
-        surat_is_complete = False
-        if intent and required_fields:
-            surat_is_complete = all(
-                item.get("field") in slots and bool(slots[item.get("field")])
-                for item in required_fields
-            )
+        main_slots_complete = bool(intent and required_fields) and all(
+            item.get("field") in slots and bool(slots[item.get("field")])
+            for item in required_fields
+        )
+
+        surat_is_complete = main_slots_complete and bool(slots.get("chosen_destination")) and bool(slots.get("target_destination_address"))
+
+        action_required = None
+        if main_slots_complete and not slots.get("chosen_destination"):
+            action_required = "delivery_method"
 
         missing_fields = [
             item.get("field") for item in required_fields
@@ -562,6 +573,7 @@ class ChatSessionMessageAPIView(APIView):
             "status": status_str,
             "state": state,
             "is_ready_to_draft": surat_is_complete,
+            "action_required": action_required,
             "thread_id": str(thread.id),
             "title": thread.title,
             "intent": intent,

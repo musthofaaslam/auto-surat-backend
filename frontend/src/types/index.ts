@@ -142,6 +142,7 @@ export interface ChatSessionMessageResponse {
   state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
   reply: string;
   is_ready_to_draft?: boolean;
+  action_required?: 'delivery_method' | null;
   intent?: string;
   detected_intent?: string;
   kode_surat?: string;
@@ -155,6 +156,7 @@ export interface ChatSessionDetailResponse {
   status: 'success' | 'ready_to_draft' | 'error';
   state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
   is_ready_to_draft: boolean;
+  action_required?: 'delivery_method' | null;
   thread_id: string;
   title: string;
   intent?: string;
