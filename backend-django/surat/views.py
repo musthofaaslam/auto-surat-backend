@@ -1,9 +1,11 @@
 import logging
+import os
 import threading
 from typing import Any, Dict, Optional
 
 from django.conf import settings
 from django.db import close_old_connections, models
+from django.http import FileResponse, Http404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, status
@@ -1131,14 +1133,14 @@ class LecturerApprovalActionAPIView(APIView):
 
         catatan = ""
         final_approved_content = None
-        final_status = "SENT"
+        final_status = "PRINTED"
         if action == "APPROVE":
             serializer = SuratApprovalActionSerializer(data=request.data)
             if not serializer.is_valid():
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             catatan = serializer.validated_data.get("catatan") or ""
             final_approved_content = serializer.validated_data.get("final_approved_content")
-            final_status = serializer.validated_data.get("final_status") or "SENT"
+            final_status = serializer.validated_data.get("final_status") or "PRINTED"
         elif action == "REJECT":
             serializer = SuratRejectActionSerializer(data=request.data)
             if not serializer.is_valid():
@@ -1243,3 +1245,134 @@ class SuratVerifyAPIView(APIView):
                 "tanggal_ttd": tte_sig.created_at
             }
         }, status=status.HTTP_200_OK)
+
+
+class SuratPreviewPdfAPIView(APIView):
+    """
+    Endpoint internal gateway untuk pratinjau dokumen PDF resmi (Zero-Cloudinary dependency).
+    Mendukung penayangan langsung di iframe peramban tanpa terhalang 401 Cloudinary atau CORS.
+    GET /surat/requests/<int:pk>/preview-pdf/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, pk: int):
+        try:
+            surat_req = SuratRequest.objects.select_related(
+                'student',
+                'student__user',
+                'student__prodi',
+                'student__fakultas',
+                'kode_surat',
+            ).get(pk=pk)
+        except SuratRequest.DoesNotExist:
+            raise Http404("Surat tidak ditemukan.")
+
+        pdf_dir = os.path.join(settings.BASE_DIR, "media", "generated_pdf")
+        os.makedirs(pdf_dir, exist_ok=True)
+
+        nomor_clean = str(surat_req.nomor_surat_resmi or f"req_{pk}").replace("/", "_")
+        possible_files = [
+            os.path.join(pdf_dir, f"surat_{pk}.pdf"),
+            os.path.join(pdf_dir, f"surat_{nomor_clean}.pdf"),
+        ]
+
+        found_path = None
+        for p in possible_files:
+            if os.path.exists(p) and os.path.getsize(p) > 0:
+                found_path = p
+                break
+
+        # Jika berkas PDF belum tersimpan di disk lokal, render on-demand via execution tools
+        if not found_path:
+            try:
+                tools = SuratExecutionTools()
+                nomor_resmi = surat_req.nomor_surat_resmi or tools.generate_official_number(surat_req)
+                qr_code = surat_req.qr_verification_code or nomor_resmi
+                effective_content = (
+                    (surat_req.final_approved_content or "").strip()
+                    or (surat_req.ai_original_draft or "").strip()
+                )
+                tools.render_pdf_and_upload(
+                    surat_request=surat_req,
+                    nomor_surat=nomor_resmi,
+                    qr_code_url=qr_code,
+                    final_approved_content=effective_content,
+                )
+                for p in possible_files:
+                    if os.path.exists(p) and os.path.getsize(p) > 0:
+                        found_path = p
+                        break
+            except Exception as render_err:
+                logger.error("Gagal men-generate PDF on-demand untuk surat pk=%s: %s", pk, render_err)
+
+        if not found_path or not os.path.exists(found_path):
+            raise Http404("Berkas PDF dokumen belum tersedia untuk surat ini.")
+
+        response = FileResponse(open(found_path, "rb"), content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="surat_{nomor_clean}.pdf"'
+        response["X-Frame-Options"] = "SAMEORIGIN"
+        return response
+
+
+class SuratDownloadPdfAPIView(APIView):
+    """
+    Endpoint internal gateway untuk pengunduhan berkas PDF resmi (Zero-Cloudinary dependency).
+    GET /surat/requests/<int:pk>/download-pdf/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, pk: int):
+        try:
+            surat_req = SuratRequest.objects.select_related(
+                'student',
+                'student__user',
+                'student__prodi',
+                'student__fakultas',
+                'kode_surat',
+            ).get(pk=pk)
+        except SuratRequest.DoesNotExist:
+            raise Http404("Surat tidak ditemukan.")
+
+        pdf_dir = os.path.join(settings.BASE_DIR, "media", "generated_pdf")
+        os.makedirs(pdf_dir, exist_ok=True)
+
+        nomor_clean = str(surat_req.nomor_surat_resmi or f"req_{pk}").replace("/", "_")
+        possible_files = [
+            os.path.join(pdf_dir, f"surat_{pk}.pdf"),
+            os.path.join(pdf_dir, f"surat_{nomor_clean}.pdf"),
+        ]
+
+        found_path = None
+        for p in possible_files:
+            if os.path.exists(p) and os.path.getsize(p) > 0:
+                found_path = p
+                break
+
+        if not found_path:
+            try:
+                tools = SuratExecutionTools()
+                nomor_resmi = surat_req.nomor_surat_resmi or tools.generate_official_number(surat_req)
+                qr_code = surat_req.qr_verification_code or nomor_resmi
+                effective_content = (
+                    (surat_req.final_approved_content or "").strip()
+                    or (surat_req.ai_original_draft or "").strip()
+                )
+                tools.render_pdf_and_upload(
+                    surat_request=surat_req,
+                    nomor_surat=nomor_resmi,
+                    qr_code_url=qr_code,
+                    final_approved_content=effective_content,
+                )
+                for p in possible_files:
+                    if os.path.exists(p) and os.path.getsize(p) > 0:
+                        found_path = p
+                        break
+            except Exception as render_err:
+                logger.error("Gagal men-generate PDF on-demand untuk surat pk=%s: %s", pk, render_err)
+
+        if not found_path or not os.path.exists(found_path):
+            raise Http404("Berkas PDF dokumen belum tersedia untuk surat ini.")
+
+        response = FileResponse(open(found_path, "rb"), content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="surat_{nomor_clean}.pdf"'
+        return response

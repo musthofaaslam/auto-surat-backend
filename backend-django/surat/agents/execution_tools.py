@@ -321,15 +321,46 @@ def _build_fallback_pdf_and_upload(context_data: Dict[str, Any]) -> str:
             with open(temp_pdf_path, "wb") as pdf_out:
                 pdf_out.write(minimal_pdf_bytes)
 
-        upload_result = cloudinary.uploader.upload(
-            temp_pdf_path,
-            resource_type="image",
-            folder="autosurat_output",
-            format="pdf",
-        )
-        if not isinstance(upload_result, dict) or not upload_result.get("secure_url"):
-            raise RuntimeError("Respons Cloudinary tidak memuat atribut 'secure_url'.")
-        return str(upload_result["secure_url"])
+        nomor_surat_clean = str(nomor_surat).replace("/", "_")
+        surat_id = context_data.get("id") or context_data.get("surat_request_id")
+
+        # Simpan salinan lokal persisten
+        try:
+            from django.conf import settings
+            import shutil
+
+            pdf_dir = os.path.join(settings.BASE_DIR, "media", "generated_pdf")
+            os.makedirs(pdf_dir, exist_ok=True)
+            local_named_path = os.path.join(pdf_dir, f"surat_{nomor_surat_clean}.pdf")
+            shutil.copyfile(temp_pdf_path, local_named_path)
+            if surat_id:
+                local_id_path = os.path.join(pdf_dir, f"surat_{surat_id}.pdf")
+                shutil.copyfile(temp_pdf_path, local_id_path)
+        except Exception as copy_err:
+            logger.warning("Gagal menyimpan fallback PDF lokal: %s", copy_err)
+
+        raw_url = None
+        try:
+            upload_result = cloudinary.uploader.upload(
+                temp_pdf_path,
+                resource_type="image",
+                folder="autosurat_output",
+                format="pdf",
+            )
+            if isinstance(upload_result, dict) and upload_result.get("secure_url"):
+                raw_url = str(upload_result["secure_url"])
+                if "/upload/fl_attachment/" in raw_url:
+                    raw_url = raw_url.replace("/upload/fl_attachment/", "/upload/")
+        except Exception as cloud_err:
+            logger.warning("Gagal upload fallback ke Cloudinary (%s), menggunakan gateway lokal.", cloud_err)
+
+        if not raw_url:
+            if surat_id:
+                raw_url = f"/surat/requests/{surat_id}/preview-pdf/"
+            else:
+                raw_url = f"/media/generated_pdf/surat_{nomor_surat_clean}.pdf"
+
+        return raw_url
     finally:
         if temp_pdf_path and os.path.exists(temp_pdf_path):
             try:
@@ -628,6 +659,8 @@ class SuratExecutionTools:
 
         return {
             "student": student,
+            "id": surat_request.id,
+            "surat_request_id": surat_request.id,
             "nama_mahasiswa": getattr(user_obj, "nama", ""),
             "nim": getattr(student, "nim", ""),
             "program_studi": getattr(prodi_obj, "nama_prodi", ""),
@@ -766,7 +799,7 @@ class SuratExecutionTools:
         surat_request: SuratRequest,
         signer: Optional[Any] = None,
         final_approved_content: Optional[str] = None,
-        final_status: str = SuratStatus.SENT,
+        final_status: str = SuratStatus.PRINTED,
     ) -> ExecutionPipelineResult:
         """
         Mengeksekusi rangkaian alat pasca-approval secara berurutan dan memperbarui
@@ -776,10 +809,10 @@ class SuratExecutionTools:
         normalized_status = (
             final_status.strip().upper()
             if isinstance(final_status, str) and final_status.strip()
-            else SuratStatus.SENT
+            else SuratStatus.PRINTED
         )
         if normalized_status not in VALID_FINAL_STATUSES:
-            normalized_status = SuratStatus.SENT
+            normalized_status = SuratStatus.PRINTED
 
         effective_content = (
             final_approved_content.strip()
@@ -851,7 +884,7 @@ def execute_post_approval_tools(
     surat_request: SuratRequest,
     signer: Optional[Any] = None,
     final_approved_content: Optional[str] = None,
-    final_status: str = SuratStatus.SENT,
+    final_status: str = SuratStatus.PRINTED,
     tools: Optional[SuratExecutionTools] = None,
 ) -> ExecutionPipelineResult:
     """

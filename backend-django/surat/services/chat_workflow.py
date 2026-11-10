@@ -517,6 +517,92 @@ def handle_switch_confirmation_redis(user_message: str, thread_id: str, session_
         )
 
 
+def extract_composite_slots_deterministically(
+    user_message: str,
+    required_fields: list,
+    current_slots: dict,
+) -> Dict[str, Any]:
+    """
+    Ekstraksi deterministik berbasis regex untuk menangkap input komposit (multi-slot)
+    dalam satu kalimat bahasa Indonesia sehari-hari, sebagai jaring pengaman (safety net)
+    pelengkap LLM.
+    Mencakup:
+    - Tanggal rentang ('dari tanggal X sampai Y', 'tgl X s/d Y')
+    - Posisi yang dilamar ('sebagai [posisi]', 'posisi [posisi]')
+    - Keperluan surat ('untuk keperluan [keperluan]', 'keperluan [keperluan]')
+    - Nama instansi tujuan ('pt [nama]', 'cv [nama]', atau teks pembuka sebelum koma)
+    """
+    if not user_message or not str(user_message).strip():
+        return {}
+
+    msg = str(user_message).strip()
+    required_field_keys = {
+        str(item.get("field"))
+        for item in required_fields
+        if isinstance(item, dict) and item.get("field")
+    }
+    extracted: Dict[str, Any] = {}
+
+    # 1. Rentang Tanggal (Mulai & Selesai)
+    date_range_pattern = r'(?:dari\s+)?(?:tanggal\s+|tgl\s+)?(\d{1,2}\s+[a-zA-Z]+(?:\s+\d{4})?|\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+(?:sampai|hingga|s/?d|-)\s+(?:tanggal\s+|tgl\s+)?(\d{1,2}\s+[a-zA-Z]+(?:\s+\d{4})?|\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)'
+    m_range = re.search(date_range_pattern, msg, re.IGNORECASE)
+    if m_range:
+        start_norm = normalize_and_validate_date_slot(m_range.group(1), msg)
+        end_norm = normalize_and_validate_date_slot(m_range.group(2), msg)
+        if start_norm and "tanggal_mulai" in required_field_keys:
+            extracted["tanggal_mulai"] = start_norm
+        if end_norm and "tanggal_selesai" in required_field_keys:
+            extracted["tanggal_selesai"] = end_norm
+
+    # 2. Posisi yang Dilamar
+    pos_pattern = r'(?:sebagai|posisi|jabatan|role)\s+([a-zA-Z0-9\s/_-]+?)(?=(?:\s+dari|\s+pada|\s+di|\s+untuk|\s+tanggal|\s+tgl|\s+selama|\.|\,|$))'
+    m_pos = re.search(pos_pattern, msg, re.IGNORECASE)
+    if m_pos and "posisi_dilamar" in required_field_keys:
+        raw_pos = m_pos.group(1).strip()
+        if len(raw_pos) >= 2 and not is_pure_date_expression(raw_pos):
+            extracted["posisi_dilamar"] = " ".join(w.capitalize() for w in raw_pos.split())
+
+    # 3. Keperluan Surat
+    tujuan_pattern = r'(?:untuk\s+keperluan|keperluan|tujuan|guna|alasan)\s+([a-zA-Z0-9\s/_-]+?)(?=(?:\s+sebagai|\s+posisi|\s+dari|\s+pada|\s+tanggal|\s+tgl|\.|\,|$))'
+    m_tujuan = re.search(tujuan_pattern, msg, re.IGNORECASE)
+    if m_tujuan:
+        raw_tujuan = m_tujuan.group(1).strip()
+        if len(raw_tujuan) >= 2 and not is_pure_date_expression(raw_tujuan):
+            norm_tujuan = " ".join(w.capitalize() for w in raw_tujuan.split())
+            if "tujuan_keperluan" in required_field_keys:
+                extracted["tujuan_keperluan"] = norm_tujuan
+            elif "alasan_pengajuan" in required_field_keys:
+                extracted["alasan_pengajuan"] = norm_tujuan
+
+    # 4. Instansi Tujuan
+    if "instansi_tujuan" in required_field_keys:
+        instansi_pattern = r'^(?:(?:di|ke|pada|kepada)\s+)?((?:pt|cv|ud|yayasan|kantor|dinas|kementerian|badan)\b[a-zA-Z0-9\s\.\-_]+?)(?=(?:\s*,\s*|\s+untuk|\s+sebagai|\s+dari|\s+tanggal|$))'
+        m_instansi = re.search(instansi_pattern, msg, re.IGNORECASE)
+        instansi_raw = None
+        if m_instansi:
+            instansi_raw = m_instansi.group(1).strip()
+        else:
+            # Pola alternatif: Klausa awal sebelum tanda koma pertama
+            m_comma = re.match(r'^\s*([^,]+?)\s*,\s*(?:untuk|sebagai|dari|tanggal)', msg, re.IGNORECASE)
+            if m_comma:
+                cand = m_comma.group(1).strip()
+                if not is_pure_date_expression(cand) and len(cand.split()) <= 6:
+                    instansi_raw = cand
+
+        if instansi_raw and len(instansi_raw) >= 2 and not is_pure_date_expression(instansi_raw):
+            clean_inst = re.sub(r'^(pt|pt\.)\s*', 'PT ', instansi_raw, flags=re.IGNORECASE)
+            clean_inst = re.sub(r'^(cv|cv\.)\s*', 'CV ', clean_inst, flags=re.IGNORECASE)
+            clean_inst = re.sub(r'^(ud|ud\.)\s*', 'UD ', clean_inst, flags=re.IGNORECASE)
+            tokens = clean_inst.split()
+            norm_instansi = " ".join(
+                tk.upper() if tk.upper() in ("PT", "CV", "UD", "TBK", "BUMN", "BUMD") else tk.capitalize()
+                for tk in tokens
+            )
+            extracted["instansi_tujuan"] = norm_instansi
+
+    return extracted
+
+
 def process_slot_filling_redis(
     user_message: str, 
     session_data: dict, 
@@ -642,6 +728,19 @@ def process_slot_filling_redis(
                         extracted_data[fk] = user_message
                         break
 
+        # Jaring pengaman deterministik multi-slot: tangkap seluruh parameter komposit dari pesan
+        if not is_pure_intent_declaration and user_message:
+            det_slots = extract_composite_slots_deterministically(
+                user_message=user_message,
+                required_fields=required_fields,
+                current_slots=current_slots,
+            )
+            for dk, dv in det_slots.items():
+                if dk not in extracted_data or not extracted_data.get(dk):
+                    extracted_data[dk] = dv
+                elif extracted_data.get(dk) and str(extracted_data.get(dk)).lower() in ("null", "none", "-", "tidak disebutkan"):
+                    extracted_data[dk] = dv
+
     # 2. TERAPKAN VALIDASI, SANITASI & AKUMULASI KE REDIS SLOTS (Accumulative Merge)
     field_map = {
         str(item.get("field")): item
@@ -712,14 +811,14 @@ def process_slot_filling_redis(
 def sanitize_extracted_slot(field_name: str, raw_value: Any) -> Any:
     """
     Membersihkan slot dari sisa kata depan atau kalimat percakapan 
-    yang tidak sengaja ikut terekstrak.
+    yang tidak sengaja ikut terekstrak pada input komposit.
     """
     if not isinstance(raw_value, str) or not raw_value.strip():
         return raw_value
 
     text = raw_value.strip()
 
-    # Sanitasi khusus instansi tujuan (buang kata depan/pembuka)
+    # Sanitasi khusus instansi tujuan (buang kata depan/pembuka dan sisa klausa komposit)
     if field_name == "instansi_tujuan":
         patterns_to_remove = [
             r'^(untuk|ke|pada|kepada|di)\s+',
@@ -728,6 +827,17 @@ def sanitize_extracted_slot(field_name: str, raw_value: Any) -> Any:
         ]
         for pattern in patterns_to_remove:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        # Jika nilai instansi memuat sisa kalimat seperti ", untuk keperluan...", pangkas
+        if "," in text:
+            cand = text.split(",")[0].strip()
+            if len(cand) >= 2 and not is_pure_date_expression(cand):
+                text = cand
+        for conj in [" untuk keperluan ", " keperluan ", " sebagai ", " dari tanggal ", " tgl "]:
+            if conj in text.lower():
+                idx = text.lower().find(conj)
+                cand = text[:idx].strip()
+                if len(cand) >= 2 and not is_pure_date_expression(cand):
+                    text = cand
 
     # Sanitasi khusus keperluan / alasan
     elif field_name in ["tujuan_keperluan", "alasan_pengajuan"]:
@@ -737,5 +847,25 @@ def sanitize_extracted_slot(field_name: str, raw_value: Any) -> Any:
         ]
         for pattern in patterns_to_remove:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        for conj in [" sebagai ", " dari tanggal ", " tgl "]:
+            if conj in text.lower():
+                idx = text.lower().find(conj)
+                cand = text[:idx].strip()
+                if len(cand) >= 2:
+                    text = cand
+
+    # Sanitasi khusus posisi yang dilamar
+    elif field_name == "posisi_dilamar":
+        patterns_to_remove = [
+            r'^(sebagai|posisi|jabatan|role)\s+',
+        ]
+        for pattern in patterns_to_remove:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        for conj in [" dari tanggal ", " tanggal ", " tgl ", " untuk keperluan "]:
+            if conj in text.lower():
+                idx = text.lower().find(conj)
+                cand = text[:idx].strip()
+                if len(cand) >= 2:
+                    text = cand
 
     return text

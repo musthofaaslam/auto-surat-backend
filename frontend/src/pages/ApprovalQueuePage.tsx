@@ -37,7 +37,7 @@ export const ApprovalQueuePage: React.FC = () => {
   // Approval Form State
   const [editedContent, setEditedContent] = useState<string>('');
   const [approvalNote, setApprovalNote] = useState<string>('');
-  const [finalStatus, setFinalStatus] = useState<'SENT' | 'PRINTED'>('SENT');
+  const [finalStatus, setFinalStatus] = useState<'SENT' | 'PRINTED'>('PRINTED');
   const [viewMode, setViewMode] = useState<'sheet' | 'diff' | 'editor'>('sheet');
 
   // Reject Modal State
@@ -444,8 +444,8 @@ export const ApprovalQueuePage: React.FC = () => {
                       onChange={(e) => setFinalStatus(e.target.value as 'SENT' | 'PRINTED')}
                       className="block w-full px-3.5 py-2 text-xs border border-slate-300 rounded-md bg-white focus:ring-1 focus:ring-slate-900 font-medium"
                     >
-                      <option value="SENT">Terbitkan & Kirim Otomatis via Email/Telegram (SENT)</option>
                       <option value="PRINTED">Terbitkan & Arsipkan untuk Cetak Fisik (PRINTED)</option>
+                      <option value="SENT">Terbitkan & Kirim Otomatis via Email/Telegram (SENT)</option>
                     </select>
                   </div>
                 </div>

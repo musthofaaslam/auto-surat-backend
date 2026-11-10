@@ -33,7 +33,7 @@ def process_approval_action(
     action,
     catatan="",
     final_approved_content=None,
-    final_status="SENT",
+    final_status="PRINTED",
 ):
     """
     Router saat Dosen melakukan APPROVE atau REJECT pada antrean surat.
@@ -126,7 +126,7 @@ def process_approval_action(
             return {"message": "Persetujuan tahap ini berhasil. Surat diteruskan ke pejabat selanjutnya."}, 200
         else:
             # Jika ini step terakhir, perbarui status menjadi APPROVED dan delegasikan penerbitan dokumen ke worker asinkron
-            resolved_final_status = final_status if final_status in ("SENT", "PRINTED") else "SENT"
+            resolved_final_status = "PRINTED"
 
             # 1. Kunci naskah persetujuan dan ubah status SuratRequest menjadi APPROVED secara sinkron
             resolved_content = (
@@ -215,7 +215,7 @@ def route_and_distribute_document(surat_request):
 def _execute_final_issuance_worker(
     surat_request_id: int,
     signer_lecturer_id: int = None,
-    final_status: str = "SENT",
+    final_status: str = "PRINTED",
 ):
     """
     Worker asinkron untuk penerbitan dokumen akhir surat secara non-blocking:
@@ -223,7 +223,7 @@ def _execute_final_issuance_worker(
     2. Mendelegasikan eksekusi penerbitan (Nomor Surat resmi sekuensial, TTE SHA-256 & QR Code,
        render WeasyPrint PDF, dan pengunggahan Cloudinary) ke `SuratExecutionTools.execute_approval_pipeline`.
     3. Menyimpan nomor_surat_resmi, qr_verification_code, file_pdf_url, dan memperbarui status
-       akhir surat menjadi SENT atau PRINTED secara atomik di dalam SuratExecutionTools.
+       akhir surat menjadi PRINTED secara atomik di dalam SuratExecutionTools.
     4. Mencatat audit log penerbitan dokumen resmi (FIN_01).
     5. Memicu pembelajaran memori gaya bahasa Fase 3 (AgenticMemoryAgent) dan
        distribusi dokumen ke Email / Telegram (_execute_distribution_worker).
@@ -244,7 +244,7 @@ def _execute_final_issuance_worker(
         if signer_lecturer_id:
             signer = Lecturer.objects.filter(pk=signer_lecturer_id).first()
 
-        resolved_final_status = final_status if final_status in ("SENT", "PRINTED") else "SENT"
+        resolved_final_status = "PRINTED"
 
         resolved_content = (
             surat_req.final_approved_content 
@@ -262,7 +262,7 @@ def _execute_final_issuance_worker(
         )
 
         logger.info(
-            f"[ASYNC_ISSUANCE_SUCCESS] SuratRequest id={surat_req.id} berhasil diterbitkan (nomor: {pipeline_result.nomor_surat_resmi})."
+            f"[ASYNC_ISSUANCE_SUCCESS] SuratRequest id={surat_req.id} berhasil diterbitkan (nomor: {pipeline_result.nomor_surat_resmi}, status: PRINTED)."
         )
 
         # Pembelajaran Memori Gaya Bahasa Fase 3 & Distribusi Dokumen
@@ -291,7 +291,7 @@ def _execute_distribution_worker(surat_request_id: int):
     1. Pembelajaran memori gaya bahasa Fase 3 (`AgenticMemoryAgent.record_feedback_memory`)
        apabila Dosen melakukan koreksi pada `final_approved_content`.
     2. Distribusi dokumen akhir (`route_and_distribute_document`) ke Email / Telegram
-       agar tidak memblokir HTTP response aksi approval dosen.
+       secara non-blocking dan terisolasi dari status legalitas dokumen.
     """
     close_old_connections()
     try:
@@ -329,7 +329,8 @@ def _execute_distribution_worker(surat_request_id: int):
         if isinstance(dist_result, dict) and dist_result.get("status") == "ERROR":
             raise RuntimeError(dist_result.get("message", "Distribusi gagal."))
         
-        surat_req.status = "SENT"
+        # Status dokumen dijamin tetap PRINTED yang sah; catat keberhasilan distribusi di audit log
+        surat_req.status = "PRINTED"
         surat_req.save(update_fields=["status"])
         
         SuratAuditLog.objects.create(
@@ -339,17 +340,27 @@ def _execute_distribution_worker(surat_request_id: int):
         )
         logger.info(f"[ASYNC_DIST_SUCCESS] Dokumen berhasil dikirim untuk SuratRequest id={surat_req.id}")
     except Exception as exc:
-        logger.exception(f"[ASYNC_DIST_ERROR] Gagal mengirim dokumen di latar belakang: {exc}")
+        logger.warning(
+            "[ASYNC_DIST_WARN] Distribusi dokumen eksternal via email/telegram tidak berhasil untuk SuratRequest id=%s: %s",
+            surat_request_id,
+            exc,
+        )
         try:
             surat_req = SuratRequest.objects.get(pk=surat_request_id)
-            surat_req.status = "DISTRIBUTION_FAILED"
+            # Dokumen resmi telah sah diterbitkan (Nomor resmi, TTE, dan PDF Cloudinary valid).
+            # Status dijamin tetap PRINTED dan tidak boleh diturunkan menjadi gagal.
+            surat_req.status = "PRINTED"
             surat_req.save(update_fields=["status"])
             SuratAuditLog.objects.create(
                 surat_request=surat_req,
-                action_id="DIST_FAILED",
-                action=f"ASYNC_FAILED: {str(exc)}"[:255]
+                action_id="DIST_WARN",
+                action=f"ASYNC_DIST_FAILED_FALLBACK_PRINTED: {str(exc)}"[:255]
             )
-        except Exception:
-            pass
+        except Exception as inner_exc:
+            logger.error(
+                "[ASYNC_DIST_CRITICAL] Gagal memperbarui status fallback PRINTED untuk SuratRequest id=%s: %s",
+                surat_request_id,
+                inner_exc,
+            )
     finally:
         close_old_connections()

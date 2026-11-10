@@ -1204,10 +1204,12 @@ class SuratDraftingAgent:
                 target_hint = ""
                 if next_missing_field and current_slots is not None:
                     target_hint = (
-                        f"\nKonteks pertanyaan saat ini sedang meminta mahasiswa mengisi field "
+                        f"\nKonteks pertanyaan utama saat ini sedang meminta field "
                         f"'{next_missing_field.get('field')}' ({next_missing_field.get('label', '')}, tipe: {next_missing_field.get('type', 'string')}). "
-                        f"Apabila pesan mahasiswa berupa jawaban yang sesuai dan valid untuk tipe field tersebut, "
-                        f"petakan nilainya ke field '{next_missing_field.get('field')}'."
+                        f"PENTING: Jika pesan mahasiswa menyebutkan banyak parameter sekaligus dalam satu kalimat "
+                        f"(misalnya menyebutkan nama instansi, keperluan, posisi magang, tanggal mulai, dan tanggal selesai sekaligus), "
+                        f"petakan SEMUA informasi tersebut secara lengkap ke field yang bersesuaian pada skema. "
+                        f"JANGAN membatasi ekstraksi hanya pada satu field."
                     )
 
                 attachment_hint = ""
@@ -1232,7 +1234,8 @@ class SuratDraftingAgent:
                     "3. Jangan mengarang atau menebak data yang tidak ada.\n"
                     f"4. ATURAN TANGGAL: Apabila pengguna menyebutkan tanggal dan bulan tanpa mencantumkan tahun (contoh: '10 November' atau '15 Desember'), WAJIB gunakan tahun berjalan saat ini yaitu {current_date.year} dalam format YYYY-MM-DD. Dilarang keras mengarang tahun 2024 atau tahun lain.\n"
                     "5. ATURAN VALIDASI TIPE: Dilarang memetakan input yang murni berupa tanggal atau angka saja ke dalam field non-tanggal (seperti instansi_tujuan, tujuan_keperluan, posisi_dilamar, mata_kuliah, judul_tugas_akhir, atau nama_beasiswa). Sebaliknya, dilarang memetakan nama instansi atau teks biasa yang bukan tanggal ke dalam field bertipe date. Jika pesan mahasiswa tidak sesuai dengan tipe parameter yang diminta, kembalikan null untuk semua field.\n"
-                    "6. ATURAN NORMALISASI KAPITALISASI & ENTITAS: Seluruh teks nama instansi/perusahaan (instansi_tujuan), posisi yang dilamar (posisi_dilamar), atau nama beasiswa (nama_beasiswa) yang ditulis secara informal atau huruf kecil (contoh: 'pt pertamina' atau 'pt.pertamina') WAJIB dinormalisasi ke standar penulisan resmi berkaidah EYD V (contoh: 'PT Pertamina', 'CV Mandiri', 'Djarum Foundation'). Singkatan 'pt'/'pt.' wajib menjadi 'PT ' dan gunakan Title Case pada setiap awal kata."
+                    "6. ATURAN NORMALISASI KAPITALISASI & ENTITAS: Seluruh teks nama instansi/perusahaan (instansi_tujuan), posisi yang dilamar (posisi_dilamar), atau nama beasiswa (nama_beasiswa) yang ditulis secara informal atau huruf kecil (contoh: 'pt pertamina' atau 'pt.pertamina') WAJIB dinormalisasi ke standar penulisan resmi berkaidah EYD V (contoh: 'PT Pertamina', 'CV Mandiri', 'Djarum Foundation'). Singkatan 'pt'/'pt.' wajib menjadi 'PT ' dan gunakan Title Case pada setiap awal kata.\n"
+                    "7. ATURAN INPUT KOMPOSIT (MULTI-PARAMETER DALAM SATU PESAN): Apabila mahasiswa memberikan kalimat gabungan yang memuat beberapa parameter sekaligus, contoh: 'pt pomodoro, untuk keperluan magang konversi sebagai frontend developer dari tanggal 2 mei sampai 4 juni', maka ekstraksi WAJIB memetakan seluruh slot yang terkandung: instansi_tujuan ('PT Pomodoro'), tujuan_keperluan ('Magang Konversi'), posisi_dilamar ('Frontend Developer'), tanggal_mulai (format YYYY-MM-DD), dan tanggal_selesai (format YYYY-MM-DD). Dilarang mengabaikan parameter lain yang disebutkan."
                 )
 
                 parsed_model = self._invoke_structured_llm(

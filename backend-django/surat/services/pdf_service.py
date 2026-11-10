@@ -1,12 +1,17 @@
 import ipaddress
+import logging
 import os
 import re
+import shutil
 import tempfile
 from urllib.parse import urlparse
 
 import cloudinary.uploader
+from django.conf import settings
 from django.template.loader import render_to_string
 from weasyprint import HTML
+
+logger = logging.getLogger(__name__)
 
 try:
     from weasyprint import default_url_fetcher
@@ -114,25 +119,51 @@ def render_and_upload_pdf(template_path, context_data):
 
         # Bersihkan nomor surat dari garis miring
         nomor_surat_clean = str(safe_context.get("nomor_surat", "unknown")).replace("/", "_")
+        surat_id = safe_context.get("id") or safe_context.get("surat_request_id")
 
-        # Unggah ke Cloudinary
-        upload_result = cloudinary.uploader.upload(
-            pdf_temp_path,
-            resource_type="image",
-            type="upload",
-            access_mode="public",
-            folder="autosurat_output",
-            public_id=f"surat_{nomor_surat_clean}",
-            overwrite=True,
-        )
-        secure_url = upload_result.get("secure_url")
+        # Simpan berkas PDF secara persisten di disk lokal (Internal Document Gateway)
+        try:
+            pdf_dir = os.path.join(settings.BASE_DIR, "media", "generated_pdf")
+            os.makedirs(pdf_dir, exist_ok=True)
+            local_named_path = os.path.join(pdf_dir, f"surat_{nomor_surat_clean}.pdf")
+            shutil.copyfile(pdf_temp_path, local_named_path)
+            if surat_id:
+                local_id_path = os.path.join(pdf_dir, f"surat_{surat_id}.pdf")
+                shutil.copyfile(pdf_temp_path, local_id_path)
+        except Exception as store_err:
+            logger.warning("Gagal menyimpan salinan PDF lokal: %s", store_err)
 
-        # Mengubah URL agar langsung mendownload file saat diklik
-        if secure_url and "/upload/" in secure_url:
-            secure_url = secure_url.replace("/upload/", "/upload/fl_attachment/")
+        secure_url = None
+        # Unggah ke Cloudinary dengan graceful fallback
+        try:
+            upload_result = cloudinary.uploader.upload(
+                pdf_temp_path,
+                resource_type="image",
+                type="upload",
+                access_mode="public",
+                folder="autosurat_output",
+                public_id=f"surat_{nomor_surat_clean}",
+                format="pdf",
+                overwrite=True,
+            )
+            raw_url = upload_result.get("secure_url")
+            if raw_url:
+                secure_url = str(raw_url)
+                if "/upload/fl_attachment/" in secure_url:
+                    secure_url = secure_url.replace("/upload/fl_attachment/", "/upload/")
+        except Exception as cloud_err:
+            logger.warning("Unggahan Cloudinary mengalami kendala (%s), menggunakan gateway lokal.", cloud_err)
+
+        # Jika Cloudinary gagal atau tidak menghasilkan URL, gunakan URL gateway lokal
+        if not secure_url:
+            if surat_id:
+                secure_url = f"/surat/requests/{surat_id}/preview-pdf/"
+            else:
+                secure_url = f"/media/generated_pdf/surat_{nomor_surat_clean}.pdf"
 
     except Exception as e:
-        raise RuntimeError(f"Gagal mengunggah PDF ke Cloudinary: {str(e)}")
+        logger.error("Kendala render PDF: %s", e)
+        raise RuntimeError(f"Gagal memproses dokumen PDF: {str(e)}")
     finally:
         if pdf_temp_path and os.path.exists(pdf_temp_path):
             try:

@@ -231,7 +231,7 @@ class SuratApprovalActionSerializer(serializers.Serializer):
     final_status = serializers.ChoiceField(
         choices=["SENT", "PRINTED"],
         required=False,
-        default="SENT",
+        default="PRINTED",
         help_text="Status akhir surat setelah eksekusi TTE dan PDF selesai ('SENT' atau 'PRINTED').",
     )
 

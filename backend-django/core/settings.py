@@ -225,11 +225,30 @@ AGENT_MAX_REVISIONS = int(os.environ.get('AGENT_MAX_REVISIONS', '1'))
 AGENT_TIMEOUT_SECONDS = float(os.environ.get('AGENT_TIMEOUT_SECONDS', '30.0'))
 REQUIRED_FIELD_SURAT_PATH = BASE_DIR / 'required_field_surat.json' 
 
-BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', '')
+def _load_live_env_var(key: str, default: str = "") -> str:
+    env_candidates = [
+        BASE_DIR / ".env",
+        BASE_DIR.parent / ".env",
+        Path("/app/.env"),
+    ]
+    for env_path in env_candidates:
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith(f"{key}="):
+                            val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            if val:
+                                return val
+            except Exception:
+                pass
+    return os.environ.get(key, default).strip()
 
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+BREVO_API_KEY = _load_live_env_var('BREVO_API_KEY')
+RESEND_API_KEY = _load_live_env_var('RESEND_API_KEY')
+DEFAULT_FROM_EMAIL = _load_live_env_var('DEFAULT_FROM_EMAIL', 'bintangwp123@gmail.com')
+TELEGRAM_BOT_TOKEN = _load_live_env_var('TELEGRAM_BOT_TOKEN')
 
 # ==============================================================================
 # KONFIGURASI DEMO ONE-STEP APPROVAL (NON-DESTRUCTIVE INTERCEPTOR)
