@@ -141,11 +141,35 @@ export interface ChatSessionMessageResponse {
   status: 'success' | 'ready_to_draft' | 'error';
   state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
   reply: string;
+  is_ready_to_draft?: boolean;
+  intent?: string;
   detected_intent?: string;
   kode_surat?: string;
   is_waiting_for_switch_confirmation?: boolean;
   collected_slots?: Record<string, any>;
+  missing_fields?: string[];
   required_fields?: DynamicFieldDef[];
+}
+
+export interface ChatSessionDetailResponse {
+  status: 'success' | 'ready_to_draft' | 'error';
+  state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
+  is_ready_to_draft: boolean;
+  thread_id: string;
+  title: string;
+  intent?: string;
+  detected_intent?: string;
+  kode_surat?: string;
+  collected_slots?: Record<string, any>;
+  missing_fields?: string[];
+  required_fields?: DynamicFieldDef[];
+  messages: Array<{
+    id: string;
+    sender: 'user' | 'assistant' | 'system';
+    text: string;
+    timestamp?: string;
+    created_at?: string;
+  }>;
 }
 
 export interface VerificationData {

@@ -167,12 +167,17 @@ def process_slot_filling_redis(
         if current_slots.get("chosen_destination") and not current_slots.get("target_destination_address"):
             current_slots["target_destination_address"] = user_message.strip()
             session_data["slots"] = current_slots
-            return f"✅ Preferensi pengiriman disimpan ({current_slots['chosen_destination']}: {current_slots['target_destination_address']}).\n\nSemua data telah lengkap! Silakan ketik **'Lanjut'** untuk memproses draf surat."
+            return (
+                f"Preferensi pengiriman disimpan ({current_slots['chosen_destination']}: {current_slots['target_destination_address']}).\n\n"
+                f"Semua data telah lengkap dan tervalidasi. Silakan klik tombol **'Lanjutkan & Simpan Draf Permohonan'** di bawah "
+                f"atau ketik **'Lanjut'** untuk memproses draf surat ke sistem."
+            )
 
         return (
-            f"✅ Seluruh data permohonan **{surat_type.nama_surat}** dan preferensi pengiriman "
+            f"Seluruh data permohonan **{surat_type.nama_surat}** dan preferensi pengiriman "
             f"({current_slots.get('chosen_destination')}: {current_slots.get('target_destination_address')}) "
-            f"telah lengkap dan siap dibuatkan draf surat!"
+            f"telah lengkap dan siap dibuatkan draf surat!\n\n"
+            f"Silakan klik tombol **'Lanjutkan & Simpan Draf Permohonan'** di bawah atau ketik **'Lanjut'** untuk memproses permohonan."
         )
 
     # 1. GUNAKAN AI / EXTRACTOR UNTUK MENANGKAP SLOT DARI PESAN BEBAS USER & BERKAS LAMPIRAN

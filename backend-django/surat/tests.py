@@ -1,10 +1,13 @@
 from django.test import TestCase
 from unittest.mock import patch, MagicMock
+from rest_framework.test import APIRequestFactory, force_authenticate
 from accounts.models import User, Faculty, Department, Lecturer, Student
-from surat.models import SuratType, SuratRequest, SuratApproval, SuratAuditLog, SuratStatus
+from surat.models import SuratType, SuratRequest, SuratApproval, SuratAuditLog, SuratStatus, ChatThread, ChatMessage
 from surat.serializers import SuratRequestDetailSerializer
 from surat.agents.execution_tools import SuratExecutionTools, ExecutionPipelineResult
 from surat.services.workflow_service import _execute_final_issuance_worker
+from surat.views import ChatSessionMessageAPIView
+from surat.services.session_manager import AutoSuratSessionManager
 
 
 class SuratArchitecturalFixesTestCase(TestCase):
@@ -300,3 +303,173 @@ class SuratArchitecturalFixesTestCase(TestCase):
         self.assertIn("tanggal_terbit", context)
         self.assertIn("tanggal_surat", context)
         self.assertEqual(context["nomor_surat"], "B/101/FT/2026")
+
+
+class ChatSessionContractAndPersistenceTestCase(TestCase):
+    """
+    Test suite untuk memvalidasi kontrak API dan persistensi sesi chat:
+    1. ChatMessage tersimpan ke PostgreSQL tanpa galat konstrain sender_type
+    2. Endpoint POST /api/surat/chat/<thread_id>/ mengembalikan is_ready_to_draft: True dan intent saat slot lengkap
+    3. Endpoint GET /api/surat/chat/<thread_id>/ mengembalikan riwayat pesan dan snapshot sesi yang utuh
+    """
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = User.objects.create(
+            id="u-std-contract-test",
+            nama="Julian Sanchez",
+            nip_nim="INF24001",
+            role="STUDENT",
+            password="password123",
+        )
+        self.user.is_authenticated = True
+        self.surat_type = SuratType.objects.create(
+            kode_surat="SR-MAG",
+            nama_surat="Surat Rekomendasi Magang",
+            required_payload_fields=[
+                {"field": "instansi_tujuan", "label": "Instansi Tujuan"},
+                {"field": "posisi_dilamar", "label": "Posisi Dilamar"},
+            ],
+        )
+        self.thread = ChatThread.objects.create(
+            user=self.user,
+            title="Sesi Permohonan Surat Magang",
+            document_type="SR-MAG",
+            status=ChatThread.ThreadStatus.ACTIVE,
+        )
+
+    def test_chat_message_persistence_without_constraint_error(self):
+        """Memastikan pesan chat dapat disimpan ke PostgreSQL tanpa galat pada kolom sender_type."""
+        msg = ChatMessage.objects.create(
+            thread=self.thread,
+            sender="user",
+            message="Saya ingin magang di PT Telekomunikasi.",
+            slots_snapshot={"instansi_tujuan": "PT Telekomunikasi"},
+        )
+        self.assertIsNotNone(msg.id)
+        saved = ChatMessage.objects.get(id=msg.id)
+        self.assertEqual(saved.message, "Saya ingin magang di PT Telekomunikasi.")
+        self.assertEqual(saved.sender, "user")
+
+    def test_chat_message_api_view_post_ready_to_draft_contract(self):
+        """
+        Memastikan endpoint POST mengembalikan is_ready_to_draft: True, 
+        intent, kode_surat, dan status ready_to_draft ketika seluruh slot wajib terpenuhi.
+        """
+        # Set session data di Redis / Manager dengan slot lengkap
+        AutoSuratSessionManager.save_session(
+            thread_id=str(self.thread.id),
+            state="COLLECTING_SLOTS",
+            intent="SR-MAG",
+            slots={
+                "instansi_tujuan": "PT Pertamina",
+                "posisi_dilamar": "Full-Stack Developer",
+                "chosen_destination": "email",
+                "target_destination_address": "julian@pertamina.test",
+            },
+            missing_slots=[],
+        )
+
+        view = ChatSessionMessageAPIView.as_view()
+        request = self.factory.post(
+            f"/api/surat/chat/{self.thread.id}/",
+            {"message": "lanjut"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        with patch.object(AutoSuratSessionManager, "handle_incoming_message", return_value="Data lengkap."):
+            response = view(request, thread_id=str(self.thread.id))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("status"), "ready_to_draft")
+        self.assertEqual(response.data.get("state"), "READY_TO_DRAFT")
+        self.assertTrue(response.data.get("is_ready_to_draft"))
+        self.assertEqual(response.data.get("intent"), "SR-MAG")
+        self.assertEqual(response.data.get("kode_surat"), "SR-MAG")
+        self.assertEqual(response.data.get("collected_slots", {}).get("instansi_tujuan"), "PT Pertamina")
+
+    def test_chat_session_api_view_get_endpoint(self):
+        """Memastikan endpoint GET /api/surat/chat/<thread_id>/ mengembalikan riwayat pesan dan snapshot sesi."""
+        ChatMessage.objects.create(
+            thread=self.thread,
+            sender="user",
+            message="Permohonan magang di PT Pertamina.",
+        )
+        ChatMessage.objects.create(
+            thread=self.thread,
+            sender="assistant",
+            message="Siap, data posisi sudah dicatat.",
+        )
+
+        AutoSuratSessionManager.save_session(
+            thread_id=str(self.thread.id),
+            state="COLLECTING_SLOTS",
+            intent="SR-MAG",
+            slots={"instansi_tujuan": "PT Pertamina"},
+            missing_slots=["posisi_dilamar"],
+        )
+
+        view = ChatSessionMessageAPIView.as_view()
+        request = self.factory.get(f"/api/surat/chat/{self.thread.id}/")
+        force_authenticate(request, user=self.user)
+
+        response = view(request, thread_id=str(self.thread.id))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("thread_id"), str(self.thread.id))
+        self.assertEqual(response.data.get("intent"), "SR-MAG")
+        self.assertFalse(response.data.get("is_ready_to_draft"))
+        messages = response.data.get("messages", [])
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["sender"], "user")
+        self.assertEqual(messages[1]["sender"], "assistant")
+
+
+class IntentDetectionPipelineTestCase(TestCase):
+    """
+    Test suite untuk memvalidasi akurasi deteksi niat (Intent Detection):
+    1. Memastikan input survey/observasi terklasifikasi sebagai SI-SUR (bukan SI-MAG)
+    2. Memastikan surat izin magang terklasifikasi sebagai SI-MAG
+    3. Memastikan surat rekomendasi magang terklasifikasi sebagai SR-MAG
+    4. Memastikan surat keterangan aktif kuliah terklasifikasi sebagai SK-KUL
+    5. Memastikan surat pengantar skck terklasifikasi sebagai SP-SKC
+    """
+
+    def setUp(self):
+        SuratType.objects.get_or_create(kode_surat="SI-SUR", defaults={"nama_surat": "surat izin survey dan observasi"})
+        SuratType.objects.get_or_create(kode_surat="SI-MAG", defaults={"nama_surat": "surat izin magang"})
+        SuratType.objects.get_or_create(kode_surat="SR-MAG", defaults={"nama_surat": "surat rekomendasi magang"})
+        SuratType.objects.get_or_create(kode_surat="SK-KUL", defaults={"nama_surat": "surat keterangan aktif kuliah"})
+        SuratType.objects.get_or_create(kode_surat="SP-SKC", defaults={"nama_surat": "surat pengantar skck"})
+        SuratType.objects.get_or_create(kode_surat="SP-TRA", defaults={"nama_surat": "surat pengantar transkip nilai"})
+        SuratType.objects.get_or_create(kode_surat="SP-TAS", defaults={"nama_surat": "surat pengantar riset tugas akhir"})
+
+    def test_detect_survey_observasi_resolves_to_si_sur(self):
+        """Memastikan 'buatkan saya izin survey dan observasi' terdeteksi sebagai SI-SUR."""
+        from surat.services.detect_intent import detect_intent_dynamically
+        result = detect_intent_dynamically("buatkan saya izin survey dan observasi")
+        self.assertEqual(result, "SI-SUR")
+
+    def test_detect_izin_magang_resolves_to_si_mag(self):
+        """Memastikan 'saya mau buat surat izin magang' terdeteksi sebagai SI-MAG."""
+        from surat.services.detect_intent import detect_intent_dynamically
+        result = detect_intent_dynamically("saya mau buat surat izin magang")
+        self.assertEqual(result, "SI-MAG")
+
+    def test_detect_rekomendasi_magang_resolves_to_sr_mag(self):
+        """Memastikan 'rekomendasi magang' terdeteksi sebagai SR-MAG."""
+        from surat.services.detect_intent import detect_intent_dynamically
+        result = detect_intent_dynamically("rekomendasi magang pertamina")
+        self.assertEqual(result, "SR-MAG")
+
+    def test_detect_aktif_kuliah_resolves_to_sk_kul(self):
+        """Memastikan 'surat keterangan aktif kuliah' terdeteksi sebagai SK-KUL."""
+        from surat.services.detect_intent import detect_intent_dynamically
+        result = detect_intent_dynamically("surat keterangan aktif kuliah untuk beasiswa")
+        self.assertEqual(result, "SK-KUL")
+
+    def test_detect_skck_resolves_to_sp_skc(self):
+        """Memastikan 'pengantar skck' terdeteksi sebagai SP-SKC."""
+        from surat.services.detect_intent import detect_intent_dynamically
+        result = detect_intent_dynamically("pengantar skck kepolisian")
+        self.assertEqual(result, "SP-SKC")

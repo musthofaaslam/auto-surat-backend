@@ -5,6 +5,7 @@ import type {
   SuratRequestDetail,
   ChatThreadInitResponse,
   ChatSessionMessageResponse,
+  ChatSessionDetailResponse,
   VerificationData,
 } from '../types';
 
@@ -111,6 +112,11 @@ export const suratService = {
       title: title || 'Permohonan Surat Baru',
       document_type: documentType || null,
     });
+    return response.data;
+  },
+
+  async getChatSession(threadId: string): Promise<ChatSessionDetailResponse> {
+    const response = await api.get<ChatSessionDetailResponse>(`/surat/chat/${threadId}/`);
     return response.data;
   },
 

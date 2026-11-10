@@ -106,10 +106,15 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     'Izin pelaksanaan survei observasi mata kuliah selama 2 pekan.',
   ];
 
-  // Initialize Chat Session when chat tab is opened
+  // Initialize or restore Chat Session when chat tab is opened
   useEffect(() => {
     if (activeTab === 'chat' && !chatThreadId) {
-      initChatSession();
+      const savedThreadId = sessionStorage.getItem('active_chat_thread_id');
+      if (savedThreadId) {
+        restoreChatSession(savedThreadId);
+      } else {
+        initChatSession();
+      }
     }
   }, [activeTab]);
 
@@ -120,11 +125,59 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     }
   }, [chatMessages]);
 
+  const restoreChatSession = async (threadId: string) => {
+    setIsChatLoading(true);
+    try {
+      const data = await suratService.getChatSession(threadId);
+      setChatThreadId(data.thread_id);
+
+      const restoredMsgs: ChatMessageItem[] =
+        data.messages && data.messages.length > 0
+          ? data.messages.map((m: any) => ({
+              id: m.id,
+              sender: m.sender,
+              text: m.text,
+              timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }))
+          : [
+              {
+                id: 'welcome',
+                sender: 'assistant',
+                text:
+                  'Halo. Saya Asisten Cerdas Persuratan Dinas Akademik (Agentic AI Level 2). ' +
+                  'Silakan jelaskan surat dinas yang Anda perlukan beserta tujuannya dalam bahasa alami. ' +
+                  'Saya akan mengekstrak atribut wajib dan memvalidasi kelengkapannya secara otomatis.',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              },
+            ];
+
+      setChatMessages(restoredMsgs);
+      if (data.collected_slots) setChatCollectedSlots(data.collected_slots);
+      if (data.missing_fields) setChatMissingFields(data.missing_fields);
+      if (data.required_fields) setChatRequiredFields(data.required_fields);
+      if (data.intent || data.kode_surat || data.detected_intent) {
+        setChatDetectedIntent(data.intent || data.kode_surat || data.detected_intent || null);
+      }
+
+      const isReady =
+        data.is_ready_to_draft === true ||
+        data.status === 'ready_to_draft' ||
+        data.state === 'READY_TO_DRAFT';
+      setChatIsReadyToDraft(isReady);
+    } catch {
+      sessionStorage.removeItem('active_chat_thread_id');
+      initChatSession();
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   const initChatSession = async (docType?: string) => {
     setIsChatLoading(true);
     try {
       const res = await suratService.initChat('Sesi Permohonan Surat', docType || null);
       setChatThreadId(res.thread_id);
+      sessionStorage.setItem('active_chat_thread_id', res.thread_id);
       setChatMessages([
         {
           id: 'welcome',
@@ -159,6 +212,15 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     if (!chatThreadId) return;
 
     const userText = chatInput.trim();
+
+    if (
+      chatIsReadyToDraft &&
+      ['lanjut', 'lanjutkan', 'proses', 'submit', 'ok', 'oke'].includes(userText.toLowerCase())
+    ) {
+      handleProceedFromChatToSubmission();
+      return;
+    }
+
     const userMsgId = `user-${Date.now()}`;
     const newMsg: ChatMessageItem = {
       id: userMsgId,
@@ -181,12 +243,17 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
       setChatAttachments([]);
 
       if (resp.intent) setChatDetectedIntent(resp.intent);
+      if (resp.detected_intent) setChatDetectedIntent(resp.detected_intent);
+      if (resp.kode_surat) setChatDetectedIntent(resp.kode_surat);
       if (resp.collected_slots) setChatCollectedSlots(resp.collected_slots);
       if (resp.missing_fields) setChatMissingFields(resp.missing_fields);
       if (resp.required_fields) setChatRequiredFields(resp.required_fields);
-      if (typeof resp.is_ready_to_draft === 'boolean') {
-        setChatIsReadyToDraft(resp.is_ready_to_draft);
-      }
+
+      const isReady =
+        resp.is_ready_to_draft === true ||
+        resp.status === 'ready_to_draft' ||
+        resp.state === 'READY_TO_DRAFT';
+      setChatIsReadyToDraft(isReady);
 
       const botMsg: ChatMessageItem = {
         id: `assistant-${Date.now()}`,
@@ -220,14 +287,16 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
           .map((m) => m.text)
           .join('\n'),
         payload_data: chatCollectedSlots,
-        chosen_destination: formChosenDestination || 'email',
-        target_destination_address: formTargetDestination || user?.email || '',
+        chosen_destination: chatCollectedSlots.chosen_destination || formChosenDestination || 'email',
+        target_destination_address:
+          chatCollectedSlots.target_destination_address || formTargetDestination || user?.email || '',
         attachments: chatAttachments,
       };
 
       const result = await suratService.createSuratRequest(payload);
       const reqId = result.request_id || result.data?.request_id;
       if (reqId) {
+        sessionStorage.removeItem('active_chat_thread_id');
         if (onSubmissionSuccess) {
           onSubmissionSuccess(reqId);
         } else {
@@ -665,7 +734,10 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
             </div>
 
             <button
-              onClick={() => initChatSession()}
+              onClick={() => {
+                sessionStorage.removeItem('active_chat_thread_id');
+                initChatSession();
+              }}
               title="Mulai sesi baru"
               className="px-2 py-1 rounded text-[11px] font-normal text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition flex items-center space-x-1 cursor-pointer"
             >

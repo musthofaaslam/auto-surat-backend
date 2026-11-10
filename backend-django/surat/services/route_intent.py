@@ -38,6 +38,29 @@ def route_intent_with_ai(user_message: str) -> str | None:
         logger.warning("GEMINI_API_KEY belum dikonfigurasi untuk AI Intent Router.")
         return None
 
+    # Ambil katalog resmi dari database (SuratType) agar prompt AI memiliki konteks lengkap
+    from surat.models import SuratType
+    try:
+        surat_types = list(SuratType.objects.all())
+        if surat_types:
+            catalog_lines = [f"- {s.kode_surat}: {s.nama_surat}" for s in surat_types]
+            catalog_text = "\n".join(catalog_lines)
+        else:
+            raise ValueError("SuratType kosong di DB")
+    except Exception:
+        catalog_text = (
+            "- SK-KUL: surat keterangan aktif kuliah\n"
+            "- SK-BEA: surat keterangan tidak Menerima beasiswa\n"
+            "- SP-TRA: surat pengantar transkip nilai\n"
+            "- SP-SKC: surat pengantar skck\n"
+            "- SP-MAG: surat pengantar magang\n"
+            "- SP-TAS: surat pengantar riset tugas akhir\n"
+            "- SR-BEA: surat rekomendasi beasiswa\n"
+            "- SR-MAG: surat rekomendasi magang\n"
+            "- SI-MAG: surat izin magang\n"
+            "- SI-SUR: surat izin survey dan observasi"
+        )
+
     timeout_sec = float(getattr(settings, "AGENT_TIMEOUT_SECONDS", 15.0))
     client = genai.Client(
         api_key=str(api_key).strip(),
@@ -46,11 +69,23 @@ def route_intent_with_ai(user_message: str) -> str | None:
     model_name = getattr(settings, "GEMINI_MODEL_NAME", "gemini-2.5-flash")
     
     prompt = f"""
-    Analisis pesan dari mahasiswa berikut dan tentukan jenis surat apa yang mereka inginkan.
-    Pesan User: "{user_message}"
-    
-    Pilih HANYA dari daftar kode surat yang tersedia pada skema yang ditentukan. 
-    Jika kalimat user sama sekali tidak jelas atau bukan permohonan surat, set nilai kode_surat menjadi null.
+    Anda adalah sistem klasifikasi permohonan surat dinas akademik perguruan tinggi.
+    Tugas Anda adalah menganalisis pesan dari mahasiswa dan menentukan kode surat dinas resmi yang paling relevan.
+
+    Daftar Katalog Resmi Jenis Surat yang Tersedia:
+    {catalog_text}
+
+    Pesan Mahasiswa:
+    "{user_message}"
+
+    Instruksi:
+    1. Pilih HANYA SATU kode_surat dari daftar katalog resmi di atas yang paling tepat mencerminkan maksud permohonan mahasiswa.
+    2. Perhatikan konteks semantik:
+       - Survei, observasi, atau pengambilan data lapangan non-magang -> SI-SUR
+       - Magang kerja industri yang memerlukan izin -> SI-MAG
+       - Rekomendasi beasiswa -> SR-BEA
+       - Riset skripsi / tugas akhir di laboratorium atau instansi -> SP-TAS
+    3. Jika kalimat user sama sekali tidak berkaitan dengan permohonan surat atau terlalu ambigu, kembalikan null pada kode_surat.
     """
 
     try:
@@ -70,6 +105,6 @@ def route_intent_with_ai(user_message: str) -> str | None:
         return result.kode_surat.value if result.kode_surat else None
 
     except Exception as e:
-        # Jaring pengaman jika AI error (misal: 503 atau format meleset)
+        # Jaring pengaman jika AI error (misal: timeout atau format meleset)
         logger.warning("AI Router Error: %s", e)
         return None

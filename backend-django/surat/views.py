@@ -472,12 +472,21 @@ class ChatSessionMessageAPIView(APIView):
                 for item in required_fields
             )
 
+        missing_fields = [
+            item.get("field") for item in required_fields
+            if not (item.get("field") in slots and bool(slots[item.get("field")]))
+        ] if required_fields else []
+
         if surat_is_complete:
             return Response({
                 "status": "ready_to_draft",
                 "state": "READY_TO_DRAFT",
+                "is_ready_to_draft": True,
+                "intent": intent,
+                "detected_intent": intent,
                 "kode_surat": intent,
                 "collected_slots": slots,
+                "missing_fields": [],
                 "required_fields": required_fields,
                 "reply": reply_message
             }, status=status.HTTP_200_OK)
@@ -486,11 +495,82 @@ class ChatSessionMessageAPIView(APIView):
         return Response({
             "status": "success",
             "state": "COLLECTING_SLOTS",
+            "is_ready_to_draft": False,
+            "intent": intent,
             "detected_intent": intent,
+            "kode_surat": intent,
             "is_waiting_for_switch_confirmation": waiting_confirmation,
             "reply": reply_message,
             "collected_slots": slots,
-            "required_fields": required_fields  # <-- Ditambahkan agar frontend langsung mendapat kontrak field wajib
+            "missing_fields": missing_fields,
+            "required_fields": required_fields
+        }, status=status.HTTP_200_OK)
+
+    def get(self, request, thread_id):
+        """
+        Mengambil detail status, riwayat pesan, dan snapshot slot dari sesi chat tertentu.
+        GET /api/surat/chat/<str:thread_id>/
+        """
+        thread = ChatThread.objects.filter(id=thread_id, user=request.user).first()
+        if not thread:
+            return Response(
+                {"status": "error", "message": "Sesi chat atau thread tidak ditemukan."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        session_data = AutoSuratSessionManager.get_session(str(thread.id))
+        intent = session_data.get("intent") or thread.document_type
+        slots = session_data.get("slots", {})
+
+        from .services.chat_workflow import get_effective_required_fields
+        required_fields = []
+        if intent:
+            try:
+                surat_type_obj = SuratType.objects.get(kode_surat=intent)
+                required_fields = get_effective_required_fields(surat_type_obj)
+            except SuratType.DoesNotExist:
+                pass
+
+        surat_is_complete = False
+        if intent and required_fields:
+            surat_is_complete = all(
+                item.get("field") in slots and bool(slots[item.get("field")])
+                for item in required_fields
+            )
+
+        missing_fields = [
+            item.get("field") for item in required_fields
+            if not (item.get("field") in slots and bool(slots[item.get("field")]))
+        ] if required_fields else []
+
+        messages = ChatMessage.objects.filter(thread=thread).order_by('created_at')
+        formatted_messages = [
+            {
+                "id": str(msg.id),
+                "sender": msg.sender,
+                "text": msg.message,
+                "timestamp": msg.created_at.strftime("%H:%M") if msg.created_at else "",
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+            }
+            for msg in messages
+        ]
+
+        state = "READY_TO_DRAFT" if surat_is_complete else session_data.get("state", "COLLECTING_SLOTS")
+        status_str = "ready_to_draft" if surat_is_complete else "success"
+
+        return Response({
+            "status": status_str,
+            "state": state,
+            "is_ready_to_draft": surat_is_complete,
+            "thread_id": str(thread.id),
+            "title": thread.title,
+            "intent": intent,
+            "detected_intent": intent,
+            "kode_surat": intent,
+            "collected_slots": slots,
+            "missing_fields": missing_fields,
+            "required_fields": required_fields,
+            "messages": formatted_messages,
         }, status=status.HTTP_200_OK)
                         
 class SuratRequestRedraftAPIView(APIView):
