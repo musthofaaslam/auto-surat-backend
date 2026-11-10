@@ -283,7 +283,11 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     if (!rawText.trim() && chatAttachments.length === 0) return;
     if (!chatThreadId) return;
 
-    const userText = rawText.trim();
+    const userText =
+      rawText.trim() ||
+      (chatAttachments.length > 0
+        ? `Melampirkan dokumen pendukung: ${chatAttachments.map((f) => f.name).join(', ')}`
+        : '');
 
     if (
       chatIsReadyToDraft &&
@@ -419,6 +423,13 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
       return [
         { label: 'Ya, Beralih Surat', value: 'Ya' },
         { label: 'Tidak, Lanjutkan Sebelumnya', value: 'Tidak' },
+      ];
+    }
+    if (msg.action_required === 'intent_clarification') {
+      return [
+        { label: 'Surat Pengantar Magang (SP-MAG)', value: 'SP-MAG' },
+        { label: 'Surat Rekomendasi Magang (SR-MAG)', value: 'SR-MAG' },
+        { label: 'Surat Izin Magang (SI-MAG)', value: 'SI-MAG' },
       ];
     }
     const lowerText = msg.text.toLowerCase();
@@ -1085,11 +1096,12 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
                     >
                       <AtSign className="w-3.5 h-3.5" />
                     </button>
-                    <label className="p-1 rounded hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer">
+                    <label className="p-1 rounded hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer" title="Unggah berkas dokumen pendukung (PDF, JPG, PNG)">
                       <Paperclip className="w-3.5 h-3.5" />
                       <input
                         type="file"
                         multiple
+                        accept=".pdf,.png,.jpg,.jpeg"
                         onChange={(e) => {
                           if (e.target.files) {
                             setChatAttachments(Array.from(e.target.files));

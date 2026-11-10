@@ -148,12 +148,13 @@ export interface ChatSessionMessageResponse {
   state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
   reply: string;
   is_ready_to_draft?: boolean;
-  action_required?: 'delivery_method' | 'switch_confirmation' | string | null;
+  action_required?: 'delivery_method' | 'switch_confirmation' | 'intent_clarification' | string | null;
   action_options?: ChatActionOption[];
   intent?: string;
   detected_intent?: string;
   kode_surat?: string;
   is_waiting_for_switch_confirmation?: boolean;
+  is_waiting_for_intent_clarification?: boolean;
   collected_slots?: Record<string, any>;
   missing_fields?: string[];
   required_fields?: DynamicFieldDef[];
@@ -163,9 +164,10 @@ export interface ChatSessionDetailResponse {
   status: 'success' | 'ready_to_draft' | 'error';
   state: 'COLLECTING_SLOTS' | 'READY_TO_DRAFT' | 'CANCELLED' | 'EXPIRED';
   is_ready_to_draft: boolean;
-  action_required?: 'delivery_method' | 'switch_confirmation' | string | null;
+  action_required?: 'delivery_method' | 'switch_confirmation' | 'intent_clarification' | string | null;
   action_options?: ChatActionOption[];
   is_waiting_for_switch_confirmation?: boolean;
+  is_waiting_for_intent_clarification?: boolean;
   thread_id: string;
   title: string;
   intent?: string;

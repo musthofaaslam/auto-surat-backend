@@ -412,3 +412,55 @@ def format_invalid_input_response(nama_surat: str, missing_labels: List[str]) ->
         f"Mohon kirimkan informasi yang benar untuk parameter berikut agar permohonan surat {nama_surat} dapat diproses:\n\n"
         f"{items_text}"
     )
+
+
+def format_out_of_context_response(user_message: str = "") -> str:
+    """
+    Format respon ketika pengguna memasukkan pertanyaan atau pesan yang berada
+    di luar konteks administrasi persuratan akademik (misal pertanyaan umum atau trivia).
+    """
+    cleaned = user_message.strip()
+    snippet = f" ('{cleaned[:45]}...')" if len(cleaned) > 45 else (f" ('{cleaned}')" if cleaned else "")
+    return (
+        f"Pesan atau pertanyaan yang Anda sampaikan{snippet} berada di luar konteks layanan administrasi persuratan akademik. "
+        "Sistem asisten AI ini dikhususkan untuk melayani pembuatan 10 jenis surat dinas resmi di lingkungan perguruan tinggi "
+        "(seperti Surat Rekomendasi Magang, Surat Pengantar Riset TA, Surat Keterangan Aktif Kuliah, dan lainnya).\n\n"
+        "Silakan ajukan permohonan surat dinas yang Anda butuhkan atau unggah dokumen pendukung resmi (seperti Letter of Acceptance atau TOR) untuk memulai."
+    )
+
+
+def format_in_flight_out_of_context_response(nama_surat: str, missing_labels: List[str], user_message: str = "") -> str:
+    """
+    Format respon ketika pengguna memasukkan pesan di luar konteks saat permohonan
+    suatu jenis surat dinas sedang aktif berjalan (di tengah proses slot filling).
+    """
+    items_text = "\n".join(f"- {label}" for label in missing_labels)
+    cleaned = user_message.strip()
+    snippet = f" ('{cleaned[:45]}...')" if len(cleaned) > 45 else (f" ('{cleaned}')" if cleaned else "")
+    return (
+        f"Informasi yang Anda sampaikan{snippet} tidak berkaitan dengan pengisian permohonan {nama_surat} yang sedang diproses.\n\n"
+        f"Saat ini sistem masih membutuhkan informasi berikut untuk melengkapi draf surat Anda:\n"
+        f"{items_text}\n\n"
+        "Silakan berikan informasi yang diminta di atas, atau ketik 'batal' apabila Anda ingin membatalkan pengajuan ini."
+    )
+
+
+def format_ambiguous_intent_clarification(detected_summary: Optional[str] = None, candidate_labels: Optional[List[str]] = None) -> str:
+    """
+    Format respon ketika lampiran atau prompt pengguna relevan dengan kegiatan kampus (misal magang atau beasiswa)
+    namun memiliki lebih dari satu alternatif jenis surat dinas yang mungkin dibutuhkan.
+    """
+    context_prefix = ""
+    if detected_summary:
+        context_prefix = f"Berdasarkan berkas lampiran yang Anda unggah ({detected_summary}), "
+    else:
+        context_prefix = "Berdasarkan konteks permohonan yang Anda sampaikan, "
+
+    options_text = ""
+    if candidate_labels:
+        options_text = "\n\n" + "\n".join(f"- {lbl}" for lbl in candidate_labels)
+
+    return (
+        f"{context_prefix}sistem mengidentifikasi adanya beberapa opsi jenis surat dinas yang relevan.{options_text}\n\n"
+        "Silakan tentukan jenis surat dinas yang Anda perlukan melalui opsi tombol di bawah ini:"
+    )

@@ -2,13 +2,16 @@ import re
 from typing import Dict, Any, Optional
 from surat.models import SuratType, ChatThread
 from .detect_intent import detect_intent_dynamically, STOP_WORDS, CATEGORY_WORDS
-from .route_intent import route_intent_with_ai
+from .route_intent import route_intent_with_ai, IntentCategoryEnum, IntentRouterOutput
 from surat.agents.letter_agent import SuratDraftingAgent
 from surat.agents.prompts import (
     CHAT_GREETING_MESSAGE,
     format_state2_missing_parameters,
     format_state3_complete_summary,
     format_invalid_input_response,
+    format_out_of_context_response,
+    format_in_flight_out_of_context_response,
+    format_ambiguous_intent_clarification,
 )
 
 
@@ -65,6 +68,38 @@ def is_pure_date_expression(text: str) -> bool:
     if all(w in DATE_ONLY_WORDS for w in words) and (
         len(digits) > 0 or any(w in MONTH_MAP for w in words)
     ):
+        return True
+
+    return False
+
+
+def is_out_of_context_message(user_message: str) -> bool:
+    """
+    Mendeteksi apakah pesan pengguna di tengah sesi jelas-jelas di luar konteks
+    administrasi persuratan akademik (misal pertanyaan trivia, hewan, lelucon, dll).
+    """
+    msg_lower = (user_message or "").strip().lower()
+    if not msg_lower:
+        return False
+
+    # Daftar kata pemicu topik non-akademik / trivia
+    trivia_tokens = [
+        "harimau", "singa", "kucing", "anjing", "hewan", "kaki berapa",
+        "resep", "masak", "cuaca", "presiden", "ibukota", "siapa nama",
+        "lagu", "film", "puisi", "lelucon", "cerita", "jokes", "tebak",
+        "berapa kaki", "punya kaki", "kaki berapa", "kenapa langit", "warna langit"
+    ]
+    if any(tok in msg_lower for tok in trivia_tokens):
+        return True
+
+    academic_keywords = {
+        "surat", "magang", "kampus", "dosen", "kuliah", "instansi", "perusahaan",
+        "pt", "cv", "dinas", "jalan", "alamat", "tanggal", "bulan", "tahun", "tgl",
+        "posisi", "keperluan", "skripsi", "tugas akhir", "beasiswa", "skck", "transkrip",
+        "lanjut", "batal", "email", "telegram"
+    }
+    words = set(re.findall(r'\w+', msg_lower))
+    if ("?" in user_message or any(w in words for w in ["siapa", "mengapa", "kenapa", "gimana", "berapa"])) and not words.intersection(academic_keywords):
         return True
 
     return False
@@ -210,13 +245,15 @@ def handle_incoming_chat_with_redis(
     """
     Menangani alur chat menggunakan state di Redis Cache 
     dan mensinkronikannya dengan model ChatThread di PostgreSQL.
+    Mendukung deteksi intent multimodal (teks + gambar/dokumen LoA),
+    resolusi ambiguitas dengan kandidat tombol, out-of-context guard,
+    dan preservasi parameter dokumen tanpa pengulangan.
     """
     cleaned_msg = user_message.strip()
     
     active_intent = session_data.get("intent")
-    pending_intent = session_data.get("pending_intent")
     waiting_confirmation = session_data.get("is_waiting_for_switch_confirmation", False)
-    current_slots = session_data.get("slots", {})
+    waiting_clarification = session_data.get("is_waiting_for_intent_clarification", False)
 
     # Ambil instance ChatThread di database untuk update field document_type jika perlu
     thread_obj = ChatThread.objects.filter(id=thread_id).first()
@@ -225,30 +262,78 @@ def handle_incoming_chat_with_redis(
     if waiting_confirmation:
         return handle_switch_confirmation_redis(cleaned_msg, thread_id, session_data, thread_obj)
 
-    # 2. Deteksi intent dari pesan user (Lapis 1 Keyword -> Lapis 2 AI Router)
+    # 2. Cek apakah sedang menunggu klarifikasi jenis surat (Ambiguity Resolution)
+    if waiting_clarification:
+        return handle_intent_clarification_choice(cleaned_msg, thread_id, session_data, thread_obj, attachments=attachments)
+
+    # 3. Deteksi intent dari pesan user (Lapis 1 Keyword)
     detected_kode_surat = detect_intent_dynamically(cleaned_msg)
-    if not detected_kode_surat and not active_intent:
-        detected_kode_surat = route_intent_with_ai(cleaned_msg)
 
-    # 3. KASUS A: Belum ada intent yang terkunci (Sesi baru)
+    # 4. KASUS A: Belum ada intent yang terkunci (Sesi baru)
     if not active_intent:
-        if not detected_kode_surat:
-            return CHAT_GREETING_MESSAGE
-        
-        # Simpan intent ke Redis & update document_type serta title di PostgreSQL
-        surat_obj = SuratType.objects.get(kode_surat=detected_kode_surat)
-        session_data["intent"] = detected_kode_surat
-        
-        if thread_obj:
-            thread_obj.document_type = detected_kode_surat
-            thread_obj.title = f"Permohonan {surat_obj.nama_surat}"
-            thread_obj.save(update_fields=['document_type', 'title', 'updated_at'])
-        
-        # Langsung ekstrak apabila di kalimat pertama mahasiswa sudah menyebutkan sebagian parameter atau melampirkan berkas
-        slot_reply = process_slot_filling_redis(cleaned_msg, session_data, is_initial_turn=True, attachments=attachments)
-        return slot_reply
+        if detected_kode_surat:
+            surat_obj = SuratType.objects.get(kode_surat=detected_kode_surat)
+            session_data["intent"] = detected_kode_surat
+            if thread_obj:
+                thread_obj.document_type = detected_kode_surat
+                thread_obj.title = f"Permohonan {surat_obj.nama_surat}"
+                thread_obj.save(update_fields=['document_type', 'title', 'updated_at'])
+            return process_slot_filling_redis(cleaned_msg, session_data, is_initial_turn=True, attachments=attachments)
 
-    # 4. KASUS B: Intent sudah terkunci, tapi user mendadak menyebutkan intent BARU
+        # Lapis 2: AI Multimodal Intent Router (menganalisis teks & lampiran berkas LoA/TOR/PDF)
+        router_result = route_intent_with_ai(cleaned_msg, attachments=attachments)
+
+        if router_result.category == IntentCategoryEnum.OFFICIAL_LETTER and router_result.kode_surat:
+            final_kode = router_result.kode_surat.value
+            try:
+                surat_obj = SuratType.objects.get(kode_surat=final_kode)
+                nama_surat = surat_obj.nama_surat
+            except SuratType.DoesNotExist:
+                nama_surat = final_kode
+
+            session_data["intent"] = final_kode
+            if router_result.extracted_parameters:
+                cur = session_data.get("slots", {})
+                cur.update(router_result.extracted_parameters)
+                session_data["slots"] = cur
+
+            if thread_obj:
+                thread_obj.document_type = final_kode
+                thread_obj.title = f"Permohonan {nama_surat}"
+                thread_obj.save(update_fields=['document_type', 'title', 'updated_at'])
+
+            return process_slot_filling_redis(cleaned_msg, session_data, is_initial_turn=True, attachments=attachments)
+
+        elif router_result.category == IntentCategoryEnum.AMBIGUOUS:
+            cand_kodes = [k.value for k in router_result.candidate_kodes]
+            session_data["is_waiting_for_intent_clarification"] = True
+            session_data["candidate_intents"] = cand_kodes
+            session_data["staged_slots"] = router_result.extracted_parameters
+            session_data["staged_document_summary"] = router_result.detected_document_summary
+
+            candidate_labels = []
+            for c in cand_kodes:
+                try:
+                    st = SuratType.objects.get(kode_surat=c)
+                    candidate_labels.append(f"{st.nama_surat} ({c})")
+                except Exception:
+                    candidate_labels.append(c)
+
+            if router_result.explanation_or_response and len(router_result.explanation_or_response) > 15:
+                return router_result.explanation_or_response
+            return format_ambiguous_intent_clarification(router_result.detected_document_summary, candidate_labels)
+
+        elif router_result.category == IntentCategoryEnum.OUT_OF_CONTEXT:
+            if router_result.explanation_or_response and len(router_result.explanation_or_response) > 15:
+                return router_result.explanation_or_response
+            return format_out_of_context_response(cleaned_msg)
+
+        elif router_result.category == IntentCategoryEnum.GREETING_OR_CHITCHAT:
+            return CHAT_GREETING_MESSAGE
+
+        return format_out_of_context_response(cleaned_msg)
+
+    # 5. KASUS B: Intent sudah terkunci, tapi user mendadak menyebutkan intent BARU
     if detected_kode_surat and detected_kode_surat != active_intent:
         old_surat = SuratType.objects.get(kode_surat=active_intent)
         new_surat = SuratType.objects.get(kode_surat=detected_kode_surat)
@@ -263,8 +348,115 @@ def handle_incoming_chat_with_redis(
             f"Silakan pilih salah satu opsi di bawah ini:"
         )
 
-    # 5. KASUS C: Lanjutkan proses Slot Filling
+    # 6. KASUS C: Lanjutkan proses Slot Filling
     return process_slot_filling_redis(cleaned_msg, session_data, attachments=attachments)
+
+
+def handle_intent_clarification_choice(
+    user_message: str,
+    thread_id: str,
+    session_data: dict,
+    thread_obj: Optional[ChatThread],
+    attachments: Optional[list] = None,
+) -> str:
+    """
+    Menangani pemilihan jenis surat ketika sesi dalam status AMBIGUOUS / menunggu klarifikasi.
+    Secara otomatis memasukkan parameter yang sudah tersimpan di staged_slots (dari LoA/lampiran)
+    sehingga mahasiswa tidak perlu menginput ulang data yang ada di dokumen.
+    """
+    cleaned = user_message.strip()
+    cleaned_lower = cleaned.lower()
+    candidate_intents = session_data.get("candidate_intents", [])
+
+    chosen_code = None
+
+    # 1. Cek kecocokan langsung kode surat (misal "SP-MAG", "SR-MAG", "SI-MAG")
+    for cand in candidate_intents:
+        if cleaned.upper() == cand or cand.lower() in cleaned_lower:
+            chosen_code = cand
+            break
+
+    # 2. Cek kecocokan berdasarkan kata kunci spesifik
+    if not chosen_code:
+        for cand in candidate_intents:
+            try:
+                st = SuratType.objects.get(kode_surat=cand)
+                st_name_lower = st.nama_surat.lower()
+                if "pengantar" in cleaned_lower and "pengantar" in st_name_lower:
+                    chosen_code = cand
+                    break
+                elif "rekomendasi" in cleaned_lower and "rekomendasi" in st_name_lower:
+                    chosen_code = cand
+                    break
+                elif "izin" in cleaned_lower and "izin" in st_name_lower:
+                    chosen_code = cand
+                    break
+                elif "aktif" in cleaned_lower and "aktif" in st_name_lower:
+                    chosen_code = cand
+                    break
+                elif "tidak menerima" in cleaned_lower and "tidak menerima" in st_name_lower:
+                    chosen_code = cand
+                    break
+            except Exception:
+                pass
+
+    # 3. Cek pemilihan berdasarkan nomor urut (1, 2, 3)
+    if not chosen_code and cleaned.isdigit():
+        idx = int(cleaned) - 1
+        if 0 <= idx < len(candidate_intents):
+            chosen_code = candidate_intents[idx]
+
+    if not chosen_code:
+        # Jika user mengetik pembatalan
+        if cleaned_lower in ["batal", "cancel", "stop", "reset"]:
+            session_data["is_waiting_for_intent_clarification"] = False
+            session_data["candidate_intents"] = []
+            session_data["staged_slots"] = {}
+            return "Permohonan surat telah dibatalkan. Silakan sampaikan jenis surat dinas yang Anda butuhkan jika ingin memulai kembali."
+
+        # Ulangi pertanyaan klarifikasi jika pilihan belum jelas
+        candidate_labels = []
+        for c in candidate_intents:
+            try:
+                st = SuratType.objects.get(kode_surat=c)
+                candidate_labels.append(f"{st.nama_surat} ({c})")
+            except Exception:
+                candidate_labels.append(c)
+        doc_summary = session_data.get("staged_document_summary")
+        return format_ambiguous_intent_clarification(doc_summary, candidate_labels)
+
+    # 4. Kunci intent terpilih dan pindahkan staged_slots ke memori aktif
+    session_data["is_waiting_for_intent_clarification"] = False
+    session_data["intent"] = chosen_code
+    session_data["candidate_intents"] = []
+
+    staged_slots = session_data.pop("staged_slots", {}) or {}
+    current_slots = session_data.get("slots", {}) or {}
+    for k, v in staged_slots.items():
+        if v and not current_slots.get(k):
+            current_slots[k] = v
+    session_data["slots"] = current_slots
+
+    try:
+        surat_obj = SuratType.objects.get(kode_surat=chosen_code)
+        nama_surat = surat_obj.nama_surat
+    except Exception:
+        nama_surat = chosen_code
+
+    if thread_obj:
+        thread_obj.document_type = chosen_code
+        thread_obj.title = f"Permohonan {nama_surat}"
+        thread_obj.save(update_fields=['document_type', 'title', 'updated_at'])
+
+    # Jalankan slot filling dengan memori yang sudah di-stage dari LoA/lampiran
+    slot_reply = process_slot_filling_redis(
+        user_message="",
+        session_data=session_data,
+        is_initial_turn=True,
+        attachments=attachments,
+    )
+    return f"Jenis surat dikonfirmasi: **{nama_surat} ({chosen_code})**.\n\n{slot_reply}"
+
 
 
 def handle_switch_confirmation_redis(user_message: str, thread_id: str, session_data: dict, thread_obj) -> str:
@@ -498,6 +690,8 @@ def process_slot_filling_redis(
             for item in missing_items
         ]
         if not is_initial_turn and newly_filled_missing_count == 0:
+            if is_out_of_context_message(user_message):
+                return format_in_flight_out_of_context_response(surat_type.nama_surat, missing_labels, user_message)
             return format_invalid_input_response(surat_type.nama_surat, missing_labels)
 
         # STATE 2: Penanganan Parameter Tidak Lengkap (Missing Entities)

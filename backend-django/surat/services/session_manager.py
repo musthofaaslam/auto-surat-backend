@@ -109,6 +109,10 @@ class AutoSuratSessionManager:
         pending_intent: Optional[str] = None,
         is_waiting_for_switch_confirmation: Optional[bool] = None,
         pending_user_message: Optional[str] = None,
+        is_waiting_for_intent_clarification: Optional[bool] = None,
+        candidate_intents: Optional[list] = None,
+        staged_slots: Optional[Dict[str, Any]] = None,
+        staged_document_summary: Optional[str] = None,
     ):
         """
         Menyimpan atau memperbarui state ke Redis Cache dengan Sliding TTL 30 menit.
@@ -127,11 +131,16 @@ class AutoSuratSessionManager:
             existing = cls.get_session(thread_id)
 
         updated_data = {
+            **existing,
             "state": state,
             "intent": intent if intent is not None else existing.get("intent"),
             "pending_intent": pending_intent if pending_intent is not None else existing.get("pending_intent"),
             "is_waiting_for_switch_confirmation": is_waiting_for_switch_confirmation if is_waiting_for_switch_confirmation is not None else existing.get("is_waiting_for_switch_confirmation", False),
             "pending_user_message": pending_user_message if pending_user_message is not None else existing.get("pending_user_message"),
+            "is_waiting_for_intent_clarification": is_waiting_for_intent_clarification if is_waiting_for_intent_clarification is not None else existing.get("is_waiting_for_intent_clarification", False),
+            "candidate_intents": candidate_intents if candidate_intents is not None else existing.get("candidate_intents", []),
+            "staged_slots": staged_slots if staged_slots is not None else existing.get("staged_slots", {}),
+            "staged_document_summary": staged_document_summary if staged_document_summary is not None else existing.get("staged_document_summary"),
             "slots": slots if slots is not None else existing.get("slots", {}),
             "missing_slots": missing_slots if missing_slots is not None else existing.get("missing_slots", [])
         }

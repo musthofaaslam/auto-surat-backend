@@ -190,6 +190,13 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         { label: 'Tidak, Lanjutkan Sebelumnya', value: 'Tidak' },
       ];
     }
+    if (msg.action_required === 'intent_clarification') {
+      return [
+        { label: 'Surat Pengantar Magang (SP-MAG)', value: 'SP-MAG' },
+        { label: 'Surat Rekomendasi Magang (SR-MAG)', value: 'SR-MAG' },
+        { label: 'Surat Izin Magang (SI-MAG)', value: 'SI-MAG' },
+      ];
+    }
     const lowerText = msg.text.toLowerCase();
     if (
       lowerText.includes('apakah anda ingin membatalkan') ||

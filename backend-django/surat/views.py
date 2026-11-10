@@ -478,6 +478,9 @@ class ChatSessionMessageAPIView(APIView):
             and bool(slots.get("target_destination_address"))
         )
 
+        waiting_clarification = session_data.get("is_waiting_for_intent_clarification", False)
+        candidate_intents = session_data.get("candidate_intents", [])
+
         action_required = None
         action_options = []
         if waiting_confirmation:
@@ -486,6 +489,15 @@ class ChatSessionMessageAPIView(APIView):
                 {"label": "Ya, Beralih Surat", "value": "Ya"},
                 {"label": "Tidak, Lanjutkan Sebelumnya", "value": "Tidak"}
             ]
+        elif waiting_clarification and candidate_intents:
+            action_required = "intent_clarification"
+            for c in candidate_intents:
+                try:
+                    surat_type_obj = SuratType.objects.get(kode_surat=c)
+                    lbl = f"{surat_type_obj.nama_surat} ({c})"
+                except Exception:
+                    lbl = c
+                action_options.append({"label": lbl, "value": c})
         elif main_slots_complete and not slots.get("chosen_destination"):
             action_required = "delivery_method"
             action_options = [
@@ -526,6 +538,7 @@ class ChatSessionMessageAPIView(APIView):
             "detected_intent": intent,
             "kode_surat": intent,
             "is_waiting_for_switch_confirmation": waiting_confirmation,
+            "is_waiting_for_intent_clarification": waiting_clarification,
             "reply": reply_message,
             "collected_slots": slots,
             "missing_fields": missing_fields,
@@ -570,6 +583,9 @@ class ChatSessionMessageAPIView(APIView):
             and bool(slots.get("target_destination_address"))
         )
 
+        waiting_clarification = session_data.get("is_waiting_for_intent_clarification", False)
+        candidate_intents = session_data.get("candidate_intents", [])
+
         action_required = None
         action_options = []
         if waiting_confirmation:
@@ -578,6 +594,15 @@ class ChatSessionMessageAPIView(APIView):
                 {"label": "Ya, Beralih Surat", "value": "Ya"},
                 {"label": "Tidak, Lanjutkan Sebelumnya", "value": "Tidak"}
             ]
+        elif waiting_clarification and candidate_intents:
+            action_required = "intent_clarification"
+            for c in candidate_intents:
+                try:
+                    surat_type_obj = SuratType.objects.get(kode_surat=c)
+                    lbl = f"{surat_type_obj.nama_surat} ({c})"
+                except Exception:
+                    lbl = c
+                action_options.append({"label": lbl, "value": c})
         elif main_slots_complete and not slots.get("chosen_destination"):
             action_required = "delivery_method"
             action_options = [
@@ -612,6 +637,7 @@ class ChatSessionMessageAPIView(APIView):
             "action_required": action_required,
             "action_options": action_options,
             "is_waiting_for_switch_confirmation": waiting_confirmation,
+            "is_waiting_for_intent_clarification": waiting_clarification,
             "thread_id": str(thread.id),
             "title": thread.title,
             "intent": intent,
