@@ -115,11 +115,84 @@ def is_slot_filled_value(val: Any) -> bool:
     return is_value_filled(val)
 
 
-def serialize_payload_value(val: Any) -> Any:
+COMMON_LOWERCASE_WORDS = {
+    "dan", "di", "ke", "dari", "pada", "untuk", "dengan", "atau", "yang",
+    "of", "and", "in", "on", "at", "for", "with"
+}
+
+KNOWN_UPPERCASE_ACRONYMS = {
+    "PT", "CV", "PLN", "BRI", "BCA", "BSI", "BNI", "BTN", "BUMN", "BUMD",
+    "DKI", "RI", "HRD", "IT", "UI", "UX", "AI", "ML", "API", "QA", "QC",
+    "CEO", "CTO", "CFO", "COO", "VP", "SVP", "AVP", "KPK", "BPJS"
+}
+
+
+def normalize_entity_casing(val: Any, field_name: str = "") -> Any:
+    """
+    Menormalisasi penulisan entitas perusahaan/instansi dan posisi sesuai kaidah EYD V:
+    - pt / pt. / p.t. -> PT
+    - cv / cv. -> CV
+    - tbk / tbk. -> Tbk.
+    - persero -> (Persero)
+    - Title Case pada setiap kata nama instansi / posisi dengan mempertahankan akronim formal.
+    """
+    if not isinstance(val, str):
+        return val
+    str_val = val.strip()
+    if not str_val or str_val.lower() in ("tidak disebutkan", "none", "null", "-", "belum ada", "tidak ada"):
+        return str_val
+
+    clean_field = field_name.strip().lower() if field_name else ""
+    target_fields = {
+        "instansi_tujuan",
+        "posisi_dilamar",
+        "nama_beasiswa",
+        "nama_instansi",
+        "perusahaan",
+    }
+    has_entity_pattern = bool(re.search(r"(?i)\b(pt|cv|tbk|persero)\b\.?", str_val))
+    if clean_field in target_fields or has_entity_pattern:
+        text = str_val
+        # 1. Normalisasi PT (pt., pt, p.t.)
+        text = re.sub(r"(?i)\bp\.?t\.?\s*", "PT ", text)
+        # 2. Normalisasi CV (cv., cv, c.v.)
+        text = re.sub(r"(?i)\bc\.?v\.?\s*", "CV ", text)
+        # 3. Normalisasi Tbk
+        text = re.sub(r"(?i)\btbk\.?\b", "Tbk.", text)
+        # 4. Normalisasi Persero
+        text = re.sub(r"(?i)\bpersero\b", "(Persero)", text)
+        text = re.sub(r"\(\(Persero\)\)", "(Persero)", text)
+
+        # 5. Penyelarasan Title Case
+        words = text.split()
+        normalized_words = []
+        for i, word in enumerate(words):
+            word_clean = word.strip()
+            word_upper = word_clean.upper()
+            word_lower = word_clean.lower()
+
+            if word_upper in KNOWN_UPPERCASE_ACRONYMS:
+                normalized_words.append(word_upper)
+            elif word_clean in ("Tbk.", "(Persero)"):
+                normalized_words.append(word_clean)
+            elif i > 0 and word_lower in COMMON_LOWERCASE_WORDS:
+                normalized_words.append(word_lower)
+            else:
+                if word_clean.startswith("(") and len(word_clean) > 1:
+                    normalized_words.append("(" + word_clean[1:].capitalize())
+                else:
+                    normalized_words.append(word_clean.capitalize())
+        return " ".join(normalized_words)
+
+    return str_val
+
+
+def serialize_payload_value(val: Any, field_name: str = "") -> Any:
     """
     Menyeragamkan nilai atribut terstruktur agar aman disimpan ke database JSONField Django
     sekaligus kompatibel dengan pengecekan substring di `views.py#L150`:
         `has_missing_info = any("tidak disebutkan" in str(v).lower() for v in structured_payload.values())`
+    Menjalankan normalisasi entitas formal berstandar EYD V (Layer 3 Sanitizer) pada nama instansi/posisi.
     Apabila nilai slot telah tervalidasi penuh oleh `is_value_filled()` (berarti merupakan penjelasan
     sah mahasiswa dan bukan penanda kosong dari LLM), namun secara kebetulan memuat frasa
     'tidak disebutkan', frasa tersebut dinormalisasi menjadi 'tidak dicantumkan spesifik' agar
@@ -133,6 +206,7 @@ def serialize_payload_value(val: Any) -> Any:
     if not str_val or str_val.lower() in ("none", "null", "-", "belum ada", "tidak ada"):
         return "Tidak disebutkan"
     if is_slot_filled_value(str_val):
+        str_val = normalize_entity_casing(str_val, field_name=field_name)
         if "tidak disebutkan" in str_val.lower():
             str_val = re.sub(
                 r"(?i)tidak\s+disebutkan",
@@ -189,7 +263,7 @@ def build_dynamic_payload_schema(
 
     def _to_clean_dict(self: Any) -> Dict[str, Any]:
         raw = self.model_dump()
-        cleaned = {k: serialize_payload_value(v) for k, v in raw.items()}
+        cleaned = {k: serialize_payload_value(v, field_name=k) for k, v in raw.items()}
         has_missing = any(not is_slot_filled_value(v) for v in raw.values())
         return BackendCompatiblePayloadDict(cleaned, has_incomplete_required_slots=has_missing)
 
@@ -238,7 +312,7 @@ def create_dynamic_agent_output_schema(
             raw = vars(self.extracted_payload)
         else:
             raw = dict(self.extracted_payload)
-        cleaned = {k: serialize_payload_value(v) for k, v in raw.items()}
+        cleaned = {k: serialize_payload_value(v, field_name=k) for k, v in raw.items()}
         has_missing = any(not is_slot_filled_value(v) for v in raw.values())
         return BackendCompatiblePayloadDict(cleaned, has_incomplete_required_slots=has_missing)
 

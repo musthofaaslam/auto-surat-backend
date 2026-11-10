@@ -12,6 +12,12 @@ Anda wajib mengekstrak seluruh atribut berikut untuk kode surat [{kode_surat}] s
 Ketentuan ekstraksi atribut:
 1. Seluruh atribut bertipe "string" wajib menggunakan bahasa Indonesia formal, lengkap, dan bebas dari singkatan tidak resmi.
 2. Seluruh atribut bertipe "date" wajib diformat dalam standar ISO 8601 (YYYY-MM-DD) dan memenuhi kronologi logis (tanggal_selesai tidak boleh mendahului tanggal_mulai).
+3. ATURAN NORMALISASI ENTITAS & TATA NAMA RESMI (EYD EDISI V):
+   Setiap nama instansi/perusahaan (`instansi_tujuan`), posisi yang dilamar (`posisi_dilamar`), nama program beasiswa (`nama_beasiswa`), dan entitas dinas wajib dinormalisasi ke standar penulisan resmi berstandar EYD V:
+   - Bentuk badan hukum: variasi singkatan informal seperti 'pt', 'pt.', 'p.t.' WAJIB distandarisasi menjadi 'PT ' (huruf kapital, tanpa titik, diikuti spasi). Variasi 'cv', 'cv.' menjadi 'CV '. Bentuk perseroan terbuka 'tbk' / 'tbk.' menjadi 'Tbk.' dan 'persero' menjadi '(Persero)'.
+   - Kapitalisasi Nama Diri / Instansi (Title Case): Nama perusahaan, yayasan, kementerian, atau dinas WAJIB menggunakan huruf kapital pada setiap awal kata (contoh: 'pt pertamina' dinormalisasi menjadi 'PT Pertamina', 'pt shopee international indonesia' menjadi 'PT Shopee International Indonesia', 'djarum foundation' menjadi 'Djarum Foundation').
+   - Posisi/Peran: Wajib menggunakan Title Case formal (contoh: 'software engineer intern' menjadi 'Software Engineer Intern', 'data analyst' menjadi 'Data Analyst').
+   - Penegasan Anti-Halusinasi: Normalisasi ejaan dan kapitalisasi resmi ini adalah kewajiban tata naskah dinas resmi dan BUKAN halusinasi data. DILARANG membiarkan penulisan nama instansi dalam format huruf kecil semua.
 
 ATURAN MUTLAK 2 - PENCEGAHAN HALUSINASI DATA (ZERO-HALLUCINATION POLICY):
 1. **Dilarang keras mengarang, menebak, atau memalsukan atribut data penting** (seperti tanggal, rentang waktu, instansi tujuan, nomor referensi, posisi/peran, maupun spesifikasi khusus lainnya) apabila tidak disebutkan secara eksplisit oleh pengguna dalam prompt.
@@ -32,10 +38,10 @@ Draf surat (`ai_original_draft`) wajib memenuhi kaidah Bahasa Indonesia ragam re
 
 ATURAN MUTLAK 4 - RUBRIK KRITIK DIRI OBJEKTIF (SELF-REFLECTION):
 Anda wajib menilai hasil kerja Anda sendiri secara kritis dan objektif pada objek `evaluation`:
-- Skor 9 - 10 : Seluruh field spesifikasi terekstrak secara akurat dari konteks pengguna tanpa asumsi, kronologi valid, dan draf surat memenuhi standar dinas tanpa cacat.
+- Skor 9 - 10 : Seluruh field spesifikasi terekstrak secara akurat dari konteks pengguna tanpa asumsi, kronologi valid, seluruh nama entitas/perusahaan/posisi telah dinormalisasi ke format resmi (Title Case & EYD V), dan draf surat memenuhi standar dinas tanpa cacat.
 - Skor 8      : Seluruh field wajib lengkap dan faktual, terdapat penyesuaian redaksional minor yang tetap layak diajukan ke Dosen/Admin.
-- Skor 1 - 7  : Terdapat atribut wajib yang belum lengkap/belum disebutkan, atau gaya bahasa belum memenuhi standar surat dinas.
-- Ketentuan Kritis: Jika `self_critique_score` bernilai kurang dari 8, Anda WAJIB mengisi daftar `revision_notes` dengan instruksi perbaikan yang spesifik dan terukur.
+- Skor 1 - 7  : Terdapat atribut wajib yang belum lengkap/belum disebutkan, penulisan nama instansi/posisi masih menggunakan huruf kecil (lowercase) tanpa kaidah EYD V, atau gaya bahasa belum memenuhi standar surat dinas.
+- Ketentuan Kritis: Jika `self_critique_score` bernilai kurang dari 8, Anda WAJIB mengisi daftar `revision_notes` dengan instruksi perbaikan yang spesifik dan terukur (termasuk instruksi perbaikan kapitalisasi nama instansi).
 {style_rules_section}"""
 
 

@@ -105,7 +105,8 @@ class SlotMemoryManager:
         if new_slots and isinstance(new_slots, dict):
             for k, v in new_slots.items():
                 if is_value_filled(v):
-                    merged[k] = v
+                    from surat.agents.schemas import normalize_entity_casing
+                    merged[k] = normalize_entity_casing(v, field_name=k)
                 elif k not in merged:
                     # Pertahankan key dengan None jika memang belum pernah terisi sama sekali
                     merged[k] = None
