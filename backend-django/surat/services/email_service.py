@@ -6,13 +6,30 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+def _resolve_brevo_credentials():
+    """
+    Mengambil kredensial Brevo secara dinamis (live resolution) dari berkas .env
+    guna mencegah penggunaan variabel lingkungan yang usang di dalam container.
+    """
+    try:
+        from core.settings import _load_live_env_var
+        api_key = _load_live_env_var("BREVO_API_KEY", getattr(settings, "BREVO_API_KEY", ""))
+        sender_email = _load_live_env_var("DEFAULT_FROM_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", "bintangwp123@gmail.com"))
+    except Exception:
+        api_key = getattr(settings, "BREVO_API_KEY", os.environ.get("BREVO_API_KEY", ""))
+        sender_email = getattr(settings, "DEFAULT_FROM_EMAIL", os.environ.get("DEFAULT_FROM_EMAIL", "bintangwp123@gmail.com"))
+
+    if not sender_email or sender_email in ("cygnusnominus@gmail.com", "no-reply@autosurat.com"):
+        sender_email = "bintangwp123@gmail.com"
+
+    return api_key.strip(), sender_email.strip()
+
 def send_surat_via_gmail_admin(recipient_email: str, subject: str, body_message: str, pdf_path: str = None):
     """
     Mengirimkan email resmi berisi dokumen surat menggunakan Brevo HTTP API (Port 443).
-    Mendukung `pdf_path` baik berupa path file lokal maupun URL Cloudinary (`https://...`).
-    Aman dari kendala jaringan di server cloud (Render).
+    Mendukung `pdf_path` baik berupa path file lokal, internal storage gateway, maupun URL Cloudinary.
     """
-    api_key = getattr(settings, "BREVO_API_KEY", os.environ.get("BREVO_API_KEY", ""))
+    api_key, sender_email = _resolve_brevo_credentials()
     
     if not api_key:
         error_msg = "BREVO_API_KEY belum dikonfigurasi di environment / settings.py."
@@ -20,7 +37,6 @@ def send_surat_via_gmail_admin(recipient_email: str, subject: str, body_message:
         return {"status": "ERROR", "message": error_msg}
 
     url = "https://api.brevo.com/v3/smtp/email"
-    sender_email = getattr(settings, "DEFAULT_FROM_EMAIL", "") or "no-reply@autosurat.com"
     
     headers = {
         "accept": "application/json",
@@ -51,14 +67,24 @@ def send_surat_via_gmail_admin(recipient_email: str, subject: str, body_message:
         "textContent": text_body
     }
 
-    # Lampirkan file PDF baik dari disk lokal maupun dari URL Cloudinary
+    # Cari file PDF lokal di disk terlebih dahulu untuk menghindari dependensi unduhan remote
+    resolved_local_pdf = None
     if pdf_path and os.path.exists(str(pdf_path)):
+        resolved_local_pdf = str(pdf_path)
+    elif pdf_path:
+        # Coba periksa apakah berkas ada di direktori media lokal generated_pdf
+        pdf_basename = os.path.basename(str(pdf_path).split("?")[0])
+        candidate_local = os.path.join(settings.BASE_DIR, "media", "generated_pdf", pdf_basename)
+        if os.path.exists(candidate_local) and os.path.getsize(candidate_local) > 0:
+            resolved_local_pdf = candidate_local
+
+    if resolved_local_pdf and os.path.exists(resolved_local_pdf):
         try:
-            with open(pdf_path, "rb") as f:
+            with open(resolved_local_pdf, "rb") as f:
                 pdf_bytes = f.read()
                 pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
                 
-            filename = os.path.basename(pdf_path) or "Surat_Resmi.pdf"
+            filename = os.path.basename(resolved_local_pdf) or "Surat_Resmi.pdf"
             if not filename.lower().endswith(".pdf"):
                 filename += ".pdf"
             payload["attachment"] = [
@@ -88,7 +114,10 @@ def send_surat_via_gmail_admin(recipient_email: str, subject: str, body_message:
 
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=20)
-        res_data = response.json()
+        try:
+            res_data = response.json()
+        except Exception:
+            res_data = {"raw_text": response.text}
 
         if response.status_code in [200, 201, 202]:
             message_id = res_data.get("messageId")
@@ -99,8 +128,8 @@ def send_surat_via_gmail_admin(recipient_email: str, subject: str, body_message:
                 "email_id": message_id
             }
         else:
-            logger.error(f"Gagal mengirim email via Brevo API: {res_data}")
-            return {"status": "ERROR", "message": str(res_data)}
+            logger.error(f"Gagal mengirim email via Brevo API (Status {response.status_code}): {res_data}")
+            return {"status": "ERROR", "message": f"Brevo HTTP {response.status_code}: {res_data}"}
 
     except Exception as e:
         logger.exception(f"Kesalahan koneksi saat mengirim email via Brevo API: {e}")
