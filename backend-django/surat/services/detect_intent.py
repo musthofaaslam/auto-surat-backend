@@ -12,7 +12,7 @@ CATEGORY_WORDS = {
     "izin", "ijin", "keterangan", "pengantar", "rekomendasi"
 }
 
-# Kamus frasa spesifik berkekuatan tinggi (presisi tinggi)
+# Kamus frasa spesifik berkekuatan tinggi 
 EXPLICIT_PHRASE_MAPPINGS = [
     # Survey / Observasi
     (r'\b(survey|survei|observasi)\b', 'SI-SUR'),

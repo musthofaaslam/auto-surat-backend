@@ -24,10 +24,10 @@ class SuratIntentEnum(str, Enum):
 
 
 class IntentCategoryEnum(str, Enum):
-    OFFICIAL_LETTER = "OFFICIAL_LETTER"            # Definitif menunjuk ke 1 jenis surat
-    AMBIGUOUS = "AMBIGUOUS"                        # Relevan dengan persuratan/lampiran, namun memiliki 2+ alternatif surat
-    OUT_OF_CONTEXT = "OUT_OF_CONTEXT"              # Tidak ada kaitannya dengan persuratan akademik (misal: trivia, pertanyaan umum)
-    GREETING_OR_CHITCHAT = "GREETING_OR_CHITCHAT"  # Salam pembuka murni tanpa permohonan spesifik
+    OFFICIAL_LETTER = "OFFICIAL_LETTER"            
+    AMBIGUOUS = "AMBIGUOUS"                        
+    OUT_OF_CONTEXT = "OUT_OF_CONTEXT"              
+    GREETING_OR_CHITCHAT = "GREETING_OR_CHITCHAT"  
 
 
 # 2. Definisikan Struktur Output Pydantic
