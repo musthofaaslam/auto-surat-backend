@@ -206,14 +206,7 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# SARAN PERBAIKAN ARSITEKTURAL:
-# 1. Ekspos variabel lingkungan LLM (`GEMINI_API_KEY` dengan fallback ke `GOOGLE_API_KEY`)
-#    secara terpusat di `settings.py` agar `SuratDraftingAgent` tidak melakukan pembacaan
-#    `os.environ` secara tersebar di lapisan bisnis.
-# 2. Sediakan parameter operasional agen (`GEMINI_MODEL_NAME`, `AGENT_CRITIQUE_MIN_SCORE`,
-#    `AGENT_MAX_REVISIONS`, `AGENT_TIMEOUT_SECONDS`) sebagai konstanta konfigurasi
-#    agar batas evaluasi Self-Reflection dan timeout jaringan dapat disesuaikan per environment
-#    tanpa memodifikasi kode sumber agen.
+
 def _load_live_env_var(key: str, default: str = "") -> str:
     env_candidates = [
         BASE_DIR / ".env",

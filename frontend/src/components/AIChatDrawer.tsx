@@ -39,7 +39,7 @@ interface AIChatDrawerProps {
   }) => void;
 }
 
-// Architectural Note (Taste-Skill 2.5 - AI Workstation):
+// Architectural Note:
 // Stateful conversational agent interface. Real-time slot extraction telemetry,
 // quick-start prompt suggestions, and seamless transition to official document drafting.
 

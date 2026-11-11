@@ -7,7 +7,7 @@ interface DiffViewerProps {
   title?: string;
 }
 
-// Architectural Note (Taste-Skill 2.5):
+// Architectural Note:
 // Visualizes the Agentic AI Level 2 Fase 3 Memory Loop. Shows human-in-the-loop edits
 // made by academic approvers against the AI's initial draft.
 

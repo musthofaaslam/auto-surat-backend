@@ -8,7 +8,7 @@ interface PDFViewerProps {
   requestId?: number | string | null;
 }
 
-// Architectural Note (Taste-Skill 2.5):
+// Architectural Note:
 // Robust PDF previewer providing native object & iframe presentation, direct download gateway,
 // and informational placeholder when the document is still in pre-approval phase.
 // Renders responsively at all breakpoints (1440, 1024, 768, 390).

@@ -9,7 +9,7 @@ interface AgentPipelineStepperProps {
   nomorSurat?: string | null;
 }
 
-// Architectural Note (Taste-Skill 2.5):
+// Architectural Note:
 // Visualizes the Agentic AI Level 2 Human-in-the-Loop lifecycle as a clean,
 // high-density technical pipeline without generic cartoon cards or clutter.
 

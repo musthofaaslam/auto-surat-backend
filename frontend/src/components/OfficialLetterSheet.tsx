@@ -9,7 +9,7 @@ interface OfficialLetterSheetProps {
   onContentChange?: (val: string) => void;
 }
 
-// Architectural Note (Taste-Skill 2.5 - Authentic Official Letter):
+// Architectural Note:
 // Renders the official academic recommendation/letter in authentic Indonesian
 // two-party administrative structure matching national higher education standard:
 // 1. Formal Institutional Letterhead (Kop Surat) with double border rule.

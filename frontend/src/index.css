@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* 
-  AutoSurat Agentic AI - TasteSkill 2.5 Design System
+  AutoSurat Agentic AI - Design System
   Strict typography, optical hairlines, tactile interactions, and authentic official letter rendering.
 */
 
@@ -44,7 +44,7 @@ body {
   min-height: 100vh;
 }
 
-/* Taste-Skill 2.5 Executive Card */
+/* Executive Card */
 .ts-card {
   background: var(--p-card);
   border: 1px solid var(--p-border);
@@ -61,7 +61,7 @@ body {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px -4px rgba(15, 23, 42, 0.06);
 }
 
-/* Taste-Skill 2.5 Tactile Button */
+/* Tactile Button */
 .ts-btn {
   font-family: var(--font-sans);
   font-weight: 500;
@@ -127,10 +127,7 @@ body {
   background: #94a3b8;
 }
 
-/* ========================================================================= */
-/* AUTO-SURAT MOTION SYSTEM (TasteSkill 2.5 Motion Architecture)             */
-/* GPU-composited, zero-CLS, responsive micro-interactions & transitions     */
-/* ========================================================================= */
+/* AUTO-SURAT MOTION SYSTEM: GPU-composited, zero-CLS, responsive micro-interactions & transitions */
 
 :root {
   /* Motion Timing Tokens */

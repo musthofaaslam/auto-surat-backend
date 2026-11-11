@@ -12,9 +12,6 @@ class User(models.Model):
     class Meta:
         db_table = 'users'
 
-# ==============================================================================
-# TAHAP 2: Struktur Organisasi & Courses
-# ==============================================================================
 
 class Faculty(models.Model):
     id = models.CharField(max_length=50, primary_key=True)
@@ -46,10 +43,6 @@ class Course(models.Model):
     class Meta:
         db_table = 'courses'
 
-
-# ==============================================================================
-# TAHAP 3: Entitas Pengguna Spesifik
-# ==============================================================================
 
 class Lecturer(models.Model):
     id = models.CharField(max_length=100, primary_key=True)
@@ -101,10 +94,6 @@ class Student(models.Model):
     class Meta:
         db_table = 'student'
 
-
-# ==============================================================================
-# TAHAP 5 & 6: Tabel Akademik & Transaksi Surat
-# ==============================================================================
 
 class StudentCourse(models.Model):
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='courses_taken')

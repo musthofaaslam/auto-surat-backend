@@ -159,13 +159,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ initialView }) => 
 
         {/* Scrollable Content Container with Smooth View Transitions */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
-          {/* ========================================================================= */}
-          {/* VIEW 1: DASHBOARD (MONITORING OVERVIEW)                                    */}
-          {/* STRICT 3-TIER STRUCTURE:                                                  */}
-          {/* 1. Metric Cards (Total Surat, Menunggu Persetujuan, Terbit - NO REVISI)   */}
-          {/* 2. Shortcut Navigation CTA (Quick Action to Buat Surat)                   */}
-          {/* 3. Riwayat Permohonan (Requests Ledger at the very bottom)                 */}
-          {/* ========================================================================= */}
           {activeMainView === 'dashboard' && (
             <div key="dashboard-view" className="space-y-6 motion-view-pane">
               {/* Structure Tier 1: Kartu Metrik Ringkasan Status */}
@@ -185,11 +178,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ initialView }) => 
             </div>
           )}
 
-          {/* ========================================================================= */}
-          {/* VIEW 2: BUAT SURAT (ACTION STUDIO)                                        */}
-          {/* ISOLATED VIEW: Form Input Surat & Sesi Chat AI                             */}
-          {/* Metric Cards and Riwayat Permohonan are strictly excluded                 */}
-          {/* ========================================================================= */}
           {activeMainView === 'buat-surat' && (
             <div key="buat-surat-view" className="motion-view-pane">
               <BuatSurat
@@ -200,9 +188,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ initialView }) => 
             </div>
           )}
 
-          {/* ========================================================================= */}
-          {/* VIEW 3: VERIFIKASI TTE (VALIDATION WORKSPACE)                              */}
-          {/* ========================================================================= */}
           {activeMainView === 'verify' && (
             <div key="verify-view" className="motion-view-pane">
               <VerifikasiTTE />

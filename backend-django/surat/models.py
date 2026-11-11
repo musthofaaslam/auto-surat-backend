@@ -3,18 +3,6 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
 from accounts.models import User, Faculty, Department, Lecturer, Student, Course, StudentCourse
 
-# SARAN PERBAIKAN ARSITEKTURAL:
-# 1. Penggunaan `models.TextChoices` (`SuratStatus` dan `ApprovalStatus`) mengunci transisi
-#    state machine pada level aplikasi sekaligus mempertahankan nilai string lama (`SUBMITTED`,
-#    `IN_REVIEW`, `APPROVED`, `REJECTED`) agar kompatibel penuh dengan `workflow_service.py`,
-#    `auto_handlers.py`, dan `manual_handlers.py`.
-# 2. Seluruh kolom Agentic AI pada `SuratRequest` (`user_prompt_context`, `ai_original_draft`,
-#    `final_approved_content`, `self_critique_score`, `revision_notes`) dikonfigurasi opsional
-#    (`null=True, blank=True` atau `default=list`) agar alur pengajuan manual/otomatis eksisting
-#    di `views.py` dan `serializers.py` tetap berjalan tanpa breaking changes.
-# 3. Model `AgentFeedbackMemory` dilengkapi indeks komposit pada `(kode_surat, is_active)`
-#    agar pengambilan aturan gaya bahasa (style rules) untuk injeksi System Prompt Fase 3
-#    tetap cepat tanpa membebani query PostgreSQL.
 
 class SuratStatus(models.TextChoices):
     PENDING_APPROVAL = "PENDING_APPROVAL", "Pending Approval (Menunggu Tinjauan Draf AI)"

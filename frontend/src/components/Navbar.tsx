@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react';
 
-// Architectural Note (Taste-Skill 2.5 - Navbar):
+// Architectural Note:
 // High-craft 72px executive header. Equal left and right content edges (--container: 1280px).
 // Zero-emoji Swiss typographic clarity, subtle 1px border hairline, and responsive drawer.
 

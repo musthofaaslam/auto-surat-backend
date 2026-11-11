@@ -9,7 +9,7 @@ interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
 }
 
-// Architectural Note (Taste-Skill 2.5):
+// Architectural Note:
 // Declarative route-guarding mechanism supporting granular role-based access control (RBAC).
 // Prevents unauthenticated access and gracefully displays 403 status for unauthorized roles.
 

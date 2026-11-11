@@ -97,9 +97,6 @@ class SuratArchitecturalFixesTestCase(TestCase):
             final_approved_content="Naskah surat rekomendasi magang yang disetujui dosen.",
         )
 
-    # =========================================================================
-    # TEMUAN 4: Field Pengiriman pada SuratRequestDetailSerializer
-    # =========================================================================
     def test_temuan4_serializer_exposes_chosen_destination_and_address(self):
         """
         Validasi Temuan 4:
@@ -114,9 +111,6 @@ class SuratArchitecturalFixesTestCase(TestCase):
         self.assertEqual(data["chosen_destination"], "email")
         self.assertEqual(data["target_destination_address"], "bintang@student.ac.id")
 
-    # =========================================================================
-    # TEMUAN 6: Resolusi Template Path Dinamis Tanpa Hardcoding
-    # =========================================================================
     def test_temuan6_resolve_template_path_existing_template(self):
         """
         Validasi Temuan 6:
@@ -158,9 +152,6 @@ class SuratArchitecturalFixesTestCase(TestCase):
         resolved_missing = tools.resolve_template_path(self.surat_req)
         self.assertEqual(resolved_missing, "kerangka-surat/base_surat.html")
 
-    # =========================================================================
-    # TEMUAN 5 & 6: Delegasi Eksekusi Pasca-Approval pada Workflow Service
-    # =========================================================================
     @patch("surat.services.workflow_service.close_old_connections")
     @patch("surat.services.workflow_service._execute_distribution_worker")
     @patch.object(SuratExecutionTools, "execute_approval_pipeline")
@@ -213,9 +204,6 @@ class SuratArchitecturalFixesTestCase(TestCase):
         # 3. Pastikan _execute_distribution_worker dipanggil
         mock_distribution.assert_called_once_with(self.surat_req.id)
 
-    # =========================================================================
-    # INTEGRASI: Eksekusi Pipeline Nyata & Context Rendering
-    # =========================================================================
     @patch("surat.agents.execution_tools._resolve_pdf_fn")
     @patch("surat.agents.execution_tools._resolve_tte_fn")
     @patch("surat.agents.execution_tools._resolve_number_fn")

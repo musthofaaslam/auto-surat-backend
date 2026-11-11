@@ -438,7 +438,7 @@ class SuratDraftingAgent:
         """
         Menangkap berkas lampiran (`attachments` / `SuratAttachment`) dari konteks worker
         `_execute_drafting_agent_worker` (`views.py`) apabila tidak diteruskan secara eksplisit
-        ke pemanggilan `active_agent.draft_letter(...)` (Menutup Bagian 2 #5).
+        ke pemanggilan `active_agent.draft_letter(...)`.
         """
         import inspect
 

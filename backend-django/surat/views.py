@@ -66,25 +66,6 @@ from .services.workflow_service import process_approval_action
 from .services.manual_handlers import create_approval_workflow_for_request
 from .services.session_manager import AutoSuratSessionManager
 
-# SARAN PERBAIKAN ARSITEKTURAL:
-# 1. Eksekusi `SuratDraftingAgent.draft_letter()` didelegasikan ke background worker thread
-#    (`_execute_drafting_agent_worker`) agar siklus inferensi LLM dan Self-Reflection Loop
-#    (5-15 detik) tidak memblokir koneksi HTTP utama pengguna (mencegah HTTP timeout).
-# 2. Setiap siklus hidup background thread memanggil `close_old_connections()` pada blok
-#    awal dan `finally` untuk mencegah kebocoran koneksi PostgreSQL (connection leak).
-# 3. Prinsip State Pausing (Agentic AI Level 2) ditegakkan secara ketat pada Fase 1:
-#    aliran eksekusi berhenti tepat setelah status mencapai `PENDING_APPROVAL` tanpa
-#    memicu pembuatan Nomor Surat Resmi, TTE, QR Code, maupun unggahan PDF ke Cloudinary.
-# 4. Kegagalan inferensi LLM (`SuratAgentTimeoutError`, `SuratAgentRateLimitError`, atau
-#    `SuratAgentError` lainnya) ditangkap secara deterministik di dalam thread untuk
-#    mengubah status `SuratRequest` menjadi `FAILED` beserta rekam jejak di `SuratAuditLog`.
-# 5. Pada Fase 2 & 3 (`LecturerApprovalActionAPIView`), saat keputusan `APPROVE` final
-#    diterima, naskah `final_approved_content` langsung dikunci di database, sementara
-#    proses pembuatan Nomor Surat, TTE QR Code, render PDF & unggah Cloudinary
-#    (`SuratExecutionTools`), serta komparasi diff gaya bahasa (`AgenticMemoryAgent`)
-#    didelegasikan ke background thread (`_execute_approval_pipeline_worker`) hingga
-#    status akhir diperbarui menjadi `SENT` atau `PRINTED`.
-
 logger = logging.getLogger(__name__)
 
 

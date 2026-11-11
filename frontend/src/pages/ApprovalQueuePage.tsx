@@ -21,7 +21,7 @@ import {
   Layers,
 } from 'lucide-react';
 
-// Architectural Note (Taste-Skill 2.5 - Document Review Studio):
+// Architectural Note:
 // Executive workspace for Lecturers and Deans. Integrates live authentic A4 document preview,
 // inline text refinement, Phase 3 Diff Comparator, and single-click TTE publication.
 

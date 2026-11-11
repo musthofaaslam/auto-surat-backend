@@ -23,18 +23,6 @@ from surat.agents.letter_agent import (
     _get_django_or_env_setting,
 )
 
-# SARAN PERBAIKAN ARSITEKTURAL:
-# 1. Evaluasi Agentic Memory Loop (Fase 3) dikombinasikan dengan pra-filter deterministik
-#    berbasis `difflib.SequenceMatcher` agar panggilan LLM (`gemini-3.8-flash`) hanya
-#    dipicu ketika benar-benar terdapat modifikasi teks antara `ai_original_draft` dan
-#    `final_approved_content` (menghemat biaya token dan latensi secara signifikan).
-# 2. Keluaran analisis diff diikat secara ketat pada skema Pydantic `MemoryDiffEvaluationSchema`
-#    menggunakan fitur Structured Outputs, sehingga hanya aturan gaya bahasa yang bersifat
-#    substantif (`is_significant=True`) yang disimpan ke tabel `AgentFeedbackMemory`.
-# 3. `AgenticMemoryAgent` mendukung Dependency Injection pada parameter `client` serta
-#    fallback heuristik terukur apabila dijalankan pada lingkungan terisolasi tanpa koneksi
-#    eksternal, menjaga keandalan pipeline pasca-approval di background thread.
-
 logger = logging.getLogger(__name__)
 
 

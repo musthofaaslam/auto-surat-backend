@@ -117,9 +117,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
   // Internal Dual-Mode Switcher: 'form' vs 'chat'
   const [activeTab, setActiveTab] = useState<'form' | 'chat'>('form');
 
-  // =========================================================================
-  // 1. FORM SURAT STATE
-  // =========================================================================
+  // Form Surat State
   const [selectedKodeSurat, setSelectedKodeSurat] = useState<string>(
     preSelectedKodeSurat || 'SK-KUL'
   );
@@ -147,9 +145,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     }
   }, [user, formChosenDestination]);
 
-  // =========================================================================
-  // 2. CHAT AI STATE
-  // =========================================================================
+  // Chat AI State
   const [chatThreadId, setChatThreadId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
   const [chatInput, setChatInput] = useState<string>('');
@@ -447,9 +443,7 @@ export const BuatSurat: React.FC<BuatSuratProps> = ({
     return [];
   };
 
-  // =========================================================================
-  // 3. FORM HANDLERS
-  // =========================================================================
+  // Form Handlers
   const currentSelectedSuratObj = suratTypes.find((s) => s.kode_surat === selectedKodeSurat);
 
   const activeRequiredFields: DynamicFieldDef[] =

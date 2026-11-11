@@ -27,7 +27,7 @@ import {
   Eye,
 } from 'lucide-react';
 
-// Architectural Note (Taste-Skill 2.5 - Document Lifecycle Inspector):
+// Architectural Note:
 // Executive inspector displaying authentic Indonesian university official letterhead (A4 Sheet),
 // Phase 3 AgentFeedbackMemory diff comparator, multi-stage approval stepper,
 // and real-time polling during asynchronous drafting/hashing execution.

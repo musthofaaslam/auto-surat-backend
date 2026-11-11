@@ -7,7 +7,7 @@ interface StatusBadgeProps {
   showDot?: boolean;
 }
 
-// Architectural Note (Taste-Skill 2.5 - Anti-Slop):
+// Architectural Note:
 // Zero-emoji semantic status tokens. Uses crisp 1px borders, subtle tints,
 // monospace metadata indicators, and micro-pulse on actively changing states.
 

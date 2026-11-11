@@ -11,7 +11,6 @@ class Command(BaseCommand):
             self.stdout.write("Memuat file JSON...")
             with open('autosurat_dummy_52users.json', 'r') as f:
                 data = json.load(f)
-        # 2. Seed Surat Types
             self.stdout.write("Seeding Surat Types...")
             for st in data['surat_types']:
                 SuratType.objects.update_or_create(

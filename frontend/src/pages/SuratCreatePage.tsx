@@ -18,7 +18,7 @@ import {
   FileCheck,
 } from 'lucide-react';
 
-// Architectural Note (Taste-Skill 2.5 - Dynamic Creation Studio):
+// Architectural Note:
 // Form studio supporting dynamic schema generation for 10 official Indonesian academic letters.
 // Features 16px legible typography, tactile input controls, and multimodal attachment ingestion.
 

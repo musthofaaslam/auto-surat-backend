@@ -15,7 +15,7 @@ import {
   Check,
 } from 'lucide-react';
 
-// Architectural Note (Taste-Skill 2.5 - Minimalist Authentication Studio):
+// Architectural Note:
 // Clean executive login workstation adhering to Swiss typographic clarity,
 // optical hairlines, and harmonized color palettes identical to the AutoSurat dashboard.
 // Strictly eliminates AI jargon and promotional banners.

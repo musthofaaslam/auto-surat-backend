@@ -10,18 +10,6 @@ from .models import (
 )
 from .services.validators import run_validators
 
-# SARAN PERBAIKAN ARSITEKTURAL:
-# 1. Pisahkan kontrak serializer untuk skema dokumentasi OpenAPI (`drf-spectacular`)
-#    secara tegas agar setiap endpoint `APIView` memiliki definisi request dan response
-#    yang tervalidasi tanpa memicu error `unable to guess serializer`.
-# 2. `SuratRequestCreateSerializer` mendukung alur Agentic AI Fase 1 melalui atribut
-#    `user_prompt_context` (serta alias `konteks`), sehingga validasi sinkron tidak memblokir
-#    permohonan berbasis bahasa alami sebelum `SuratDraftingAgent` mengekstrak `payload_data`
-#    di latar belakang.
-# 3. `SuratApprovalActionSerializer` dan `LecturerApprovalActionRequestSerializer`
-#    menerima koreksi `final_approved_content` serta pilihan `final_status` (`SENT` / `PRINTED`)
-#    dari Dosen/Pejabat saat menyetujui draf yang berstatus `PENDING_APPROVAL`.
-
 
 class SuratRequestCreateSerializer(serializers.Serializer):
     """

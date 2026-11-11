@@ -10,7 +10,7 @@ _BRIDGE_INSTALLED = False
 def ensure_approval_queue_for_request(surat_request: Any) -> int:
     """
     Membangun antrean berjenjang `SuratApproval` berdasarkan `ApprovalRule` (DPA -> KAPRODI -> DEKAN)
-    ketika draf AI pada `SuratRequest` mencapai status `PENDING_APPROVAL` (Menutup Bagian 2 #1).
+    ketika draf AI pada `SuratRequest` mencapai status `PENDING_APPROVAL`.
     Jika `SuratApproval` untuk `surat_request` tersebut sudah ada, fungsi ini bersifat idempotent.
     """
     try:
@@ -97,7 +97,7 @@ def persist_attachments_for_request(
     """
     Menyimpan berkas lampiran (`attachments`) dari permohonan mahasiswa ke Cloudinary
     dan mencatatnya ke tabel `SuratAttachment`, serta mengekstrak byte dokumen untuk
-    diteruskan ke Gemini Multimodal API pada `SuratDraftingAgent` (Menutup Bagian 2 #5).
+    diteruskan ke Gemini Multimodal API pada `SuratDraftingAgent`.
     """
     extracted_multimodal_parts: List[Dict[str, Any]] = []
     if not attachment_files:
@@ -175,8 +175,7 @@ def build_safe_validator_adapter(original_validators: Dict[str, Any]) -> Dict[st
     Membungkus dictionary `SURAT_VALIDATORS` di `surat/services/validators.py` dengan
     Intelligent Signature Adapter agar ketidaksesuaian jumlah parameter pada 5 jenis surat
     (`SK-BEA`, `SP-SKC`, `SI-MAG`, `SI-SUR`, `SP-TRA`) dan perbedaan nama key `student_courses_data`
-    (`student_id` vs `nim`, `course_id` vs `kode_matkul`) terselesaikan tanpa melempar `TypeError`
-    (Menutup Bagian 2 #7).
+    (`student_id` vs `nim`, `course_id` vs `kode_matkul`) terselesaikan tanpa melempar `TypeError`.
     """
 
     def _normalize_courses_data(
@@ -379,11 +378,11 @@ def install_backend_integration_bridges() -> None:
     Memasang jembatan integrasi (Runtime Integration Bridges) dari modul `surat.agents`
     ke komponen-komponen backend (`SuratType`, `SuratRequest`, `SURAT_VALIDATORS`)
     secara non-intrusif tanpa perlu mengubah kode di luar `surat/agents/`:
-    1. Bridge `SuratType.required_fields_dict` -> `required_payload_fields` (Bagian 2 #3).
+    1. Bridge `SuratType.required_fields_dict` -> `required_payload_fields`.
     2. Bridge `SuratRequest.save` -> otomatis men-generate antrean `SuratApproval` saat
        status menjadi `PENDING_APPROVAL` dan menangkap `attachments` dari request aktif
-       untuk disimpan ke `SuratAttachment` & diteruskan ke Gemini Multimodal (Bagian 2 #1 & #5).
-    3. Bridge `SURAT_VALIDATORS` -> mengadaptasi signature ke-10 fungsi validator (Bagian 2 #7).
+       untuk disimpan ke `SuratAttachment` & diteruskan ke Gemini Multimodal.
+    3. Bridge `SURAT_VALIDATORS` -> mengadaptasi signature ke-10 fungsi validator.
     """
     global _BRIDGE_INSTALLED
     if _BRIDGE_INSTALLED:
