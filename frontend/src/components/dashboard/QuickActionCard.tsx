@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Sparkles, ArrowRight } from 'lucide-react';
+import { Plus, ArrowRight } from 'lucide-react';
 
 interface QuickActionCardProps {
   onNavigateToBuatSurat: () => void;
@@ -9,8 +9,7 @@ export const QuickActionCard: React.FC<QuickActionCardProps> = ({ onNavigateToBu
   return (
     <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-5 sm:p-6 text-white shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-slate-700/80">
       <div className="space-y-1.5 max-w-2xl">
-        <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/30 text-[10px] font-semibold tracking-wide uppercase">
-          <Sparkles className="w-3 h-3 text-blue-300" />
+        <div className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/30 text-[10px] font-semibold tracking-wide uppercase">
           <span>Layanan Persuratan Mandiri</span>
         </div>
         <h2 className="text-base sm:text-lg font-bold tracking-tight text-white">

@@ -11,7 +11,6 @@ import {
   PlusCircle,
   User as UserIcon,
   X,
-  Sparkles,
 } from 'lucide-react';
 import type { SuratType, MainViewType } from '../types';
 
@@ -166,15 +165,9 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
 
           {!isCollapsed && (
             <div className="flex flex-col min-w-0 animate-in fade-in duration-200">
-              <div className="flex items-center space-x-1.5">
-                <span className="font-semibold text-sm tracking-tight text-slate-900 leading-tight">
-                  AutoSurat
-                </span>
-                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/70">
-                  <Sparkles className="w-2.5 h-2.5 mr-0.5" />
-                  v2.0
-                </span>
-              </div>
+              <span className="font-semibold text-sm tracking-tight text-slate-900 leading-tight">
+                AutoSurat
+              </span>
               <span className="text-[10px] text-slate-400 tracking-wider uppercase font-normal truncate">
                 Tata Naskah Dinas
               </span>

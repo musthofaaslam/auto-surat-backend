@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import suratService from '../services/suratService';
 import { extractErrorMessage } from '../services/api';
 import type { SuratRequestDetail } from '../types';
@@ -11,7 +12,6 @@ import OfficialLetterSheet from '../components/OfficialLetterSheet';
 import {
   ArrowLeft,
   RefreshCw,
-  Sparkles,
   CheckCircle2,
   AlertTriangle,
   Clock,
@@ -33,10 +33,15 @@ import {
 // and real-time polling during asynchronous drafting/hashing execution.
 
 export const SuratDetailPage: React.FC = () => {
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const [detail, setDetail] = useState<SuratRequestDetail | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Determine whether the logged in user is a reviewer/approver (Lecturer, Staff, Admin)
+  const isApproverOrLecturer =
+    user?.role === 'LECTURER' || user?.role === 'STAFF' || user?.role === 'ADMIN';
 
   // Inspector View Modes: 'sheet' (Authentic A4 Letter) | 'audit' (AI Telemetry & Diff) | 'pdf' (Published PDF)
   const [inspectorView, setInspectorView] = useState<'sheet' | 'audit' | 'pdf'>('sheet');
@@ -320,17 +325,19 @@ export const SuratDetailPage: React.FC = () => {
               <FileText className="w-4 h-4 mr-2" />
               Lembar Surat Resmi (A4 Sheet)
             </button>
-            <button
-              onClick={() => setInspectorView('audit')}
-              className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-lg transition ts-btn ${
-                inspectorView === 'audit'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <GitCompare className="w-4 h-4 mr-2" />
-              Telemetri AI & Diff Naskah
-            </button>
+            {isApproverOrLecturer && (
+              <button
+                onClick={() => setInspectorView('audit')}
+                className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-lg transition ts-btn ${
+                  inspectorView === 'audit'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <GitCompare className="w-4 h-4 mr-2" />
+                Telemetri AI & Diff Naskah
+              </button>
+            )}
             {detail.file_pdf_url && (
               <button
                 onClick={() => setInspectorView('pdf')}
@@ -352,12 +359,12 @@ export const SuratDetailPage: React.FC = () => {
         </div>
 
         {/* View Content */}
-        {inspectorView === 'sheet' ? (
+        {inspectorView === 'sheet' || (!isApproverOrLecturer && inspectorView === 'audit') ? (
           /* AUTHENTIC OFFICIAL LETTER A4 SHEET VIEW */
           <div className="bg-slate-100/70 p-6 sm:p-10 rounded-xl border border-slate-200 overflow-x-auto">
             <OfficialLetterSheet detail={detail} />
           </div>
-        ) : inspectorView === 'audit' ? (
+        ) : inspectorView === 'audit' && isApproverOrLecturer ? (
           /* AI TELEMETRY, DIFF, AND APPROVAL HIERARCHY */
           <div className="space-y-6">
             {/* Phase 3 Diff Engine */}

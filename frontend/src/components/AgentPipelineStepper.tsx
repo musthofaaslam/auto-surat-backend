@@ -1,6 +1,6 @@
 import React from 'react';
 import type { SuratStatusCode, SuratApproval } from '../types';
-import { Sparkles, ShieldCheck, CheckCircle2, Clock, AlertTriangle, FileText, Send, XCircle } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, Clock, AlertTriangle, FileText, Send, XCircle } from 'lucide-react';
 
 interface AgentPipelineStepperProps {
   status: SuratStatusCode;
@@ -42,10 +42,10 @@ export const AgentPipelineStepper: React.FC<AgentPipelineStepperProps> = ({
       <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-slate-100">
         <div className="flex items-center space-x-2">
           <div className="w-5 h-5 rounded bg-slate-900 text-white flex items-center justify-center">
-            <Sparkles className="w-3 h-3 text-blue-400" />
+            <FileText className="w-3 h-3 text-slate-200" />
           </div>
           <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-            Alur Pipeline Agentic AI Level 2 (Human-in-the-Loop)
+            Tahapan Permohonan Surat
           </h2>
         </div>
         <div className="text-[11px] font-mono text-slate-500">

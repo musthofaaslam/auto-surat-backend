@@ -11,7 +11,6 @@ import {
   User as UserIcon,
   Menu,
   X,
-  Sparkles,
 } from 'lucide-react';
 
 // Architectural Note (Taste-Skill 2.5 - Navbar):
@@ -49,27 +48,21 @@ export const Navbar: React.FC = () => {
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 transition-all">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-[72px]">
+        <div className="flex items-center justify-between h-16">
           {/* Brand Mark */}
-          <div className="flex items-center space-x-10">
+          <div className="flex items-center space-x-8">
             <Link
               to="/dashboard"
-              className="flex items-center space-x-3 focus:outline-none group"
+              className="flex items-center space-x-2.5 focus:outline-none group"
             >
-              <div className="w-9 h-9 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-xs group-hover:bg-slate-800 transition">
-                <FileText className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-2xs group-hover:bg-slate-800 transition">
+                <FileText className="w-4 h-4" />
               </div>
               <div className="flex flex-col">
-                <div className="flex items-center space-x-1.5">
-                  <span className="font-bold text-base tracking-tight text-slate-900 leading-tight">
-                    AutoSurat
-                  </span>
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/60 font-mono">
-                    <Sparkles className="w-2.5 h-2.5 mr-1" />
-                    v2.0 AI
-                  </span>
-                </div>
-                <span className="text-[11px] text-slate-500 tracking-wider uppercase font-medium">
+                <span className="font-semibold text-sm tracking-tight text-slate-900 leading-tight">
+                  AutoSurat
+                </span>
+                <span className="text-[10px] text-slate-400 tracking-wider uppercase font-normal">
                   Tata Naskah Dinas Akademik
                 </span>
               </div>
@@ -135,7 +128,7 @@ export const Navbar: React.FC = () => {
             )}
           </div>
 
-          {/* User Controls & Mobile Menu Button */}
+          {/* User Controls & Navigation Buttons */}
           <div className="flex items-center space-x-3">
             {isAuthenticated && user ? (
               <div className="flex items-center space-x-3">
@@ -153,7 +146,7 @@ export const Navbar: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shadow-2xs">
+                <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shadow-2xs">
                   <UserIcon className="w-4 h-4" />
                 </div>
 
@@ -178,16 +171,24 @@ export const Navbar: React.FC = () => {
               <div className="flex items-center space-x-2">
                 <Link
                   to="/verify"
-                  className="px-3.5 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 transition ts-btn"
+                  className={`inline-flex items-center px-3.5 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 ts-btn ${
+                    isActive('/verify')
+                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
+                  }`}
                 >
-                  Verifikasi Publik
+                  <ShieldCheck className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                  <span>Verifikasi Dokumen TTE</span>
                 </Link>
-                <Link
-                  to="/login"
-                  className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md shadow-xs transition ts-btn"
-                >
-                  Masuk Akun
-                </Link>
+
+                {!isActive('/login') && (
+                  <Link
+                    to="/login"
+                    className="inline-flex items-center px-4 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-2xs transition ts-btn"
+                  >
+                    Masuk Akun
+                  </Link>
+                )}
               </div>
             )}
           </div>

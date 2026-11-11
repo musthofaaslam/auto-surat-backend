@@ -147,12 +147,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ initialView }) => 
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="flex items-center space-x-1.5">
-              <span className="font-semibold text-sm tracking-tight text-slate-900">AutoSurat</span>
-              <span className="text-[10px] px-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                v2.0
-              </span>
-            </div>
+            <span className="font-semibold text-sm tracking-tight text-slate-900">AutoSurat</span>
           </div>
 
           <div className="flex items-center space-x-2">
