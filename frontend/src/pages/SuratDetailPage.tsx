@@ -461,6 +461,7 @@ export const SuratDetailPage: React.FC = () => {
               pdfUrl={detail.file_pdf_url}
               nomorSurat={detail.nomor_surat_resmi}
               documentTitle={detail.nama_surat}
+              requestId={detail.id}
             />
           </div>
         )}

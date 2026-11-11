@@ -96,11 +96,12 @@ class SuratDraftingAgent:
 
     DEFAULT_CRITIQUE_THRESHOLD: int = 8
     DEFAULT_MAX_REVISIONS: int = 1
-    DEFAULT_MODEL_NAME: str = "gemini-3.1-flash-lite"
+    DEFAULT_MODEL_NAME: str = "gemini-3.5-flash-lite"
     FALLBACK_MODELS: tuple = (
-        "gemini-3.1-flash-lite",
-        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
         "gemini-flash-lite-latest",
+        "gemini-flash-latest",
     )
     DEFAULT_TIMEOUT_SECONDS: float = 30.0
 
@@ -176,7 +177,7 @@ class SuratDraftingAgent:
             ) from exc
 
         timeout_ms = int(self.timeout_seconds * 1000)
-        http_options = types.HttpOptions(timeout=timeout_ms)
+        http_options = types.HttpOptions(api_version="v1beta", timeout=timeout_ms)
         self._client = genai.Client(
             api_key=self.api_key.strip(),
             http_options=http_options,

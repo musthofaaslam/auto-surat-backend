@@ -159,9 +159,9 @@ def route_intent_with_ai(
     timeout_sec = float(getattr(settings, "AGENT_TIMEOUT_SECONDS", 15.0))
     client = genai.Client(
         api_key=str(api_key).strip(),
-        http_options=types.HttpOptions(timeout=int(timeout_sec * 1000)),
+        http_options=types.HttpOptions(api_version="v1beta", timeout=int(timeout_sec * 1000)),
     )
-    model_name = getattr(settings, "GEMINI_MODEL_NAME", "gemini-2.5-flash")
+    model_name = getattr(settings, "GEMINI_MODEL_NAME", "gemini-3.5-flash-lite")
     
     prompt = f"""
     Anda adalah sistem klasifikasi cerdas permohonan surat dinas akademik perguruan tinggi.

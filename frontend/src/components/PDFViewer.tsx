@@ -9,10 +9,10 @@ interface PDFViewerProps {
 }
 
 // Architectural Note (Taste-Skill 2.5):
-// Robust PDF previewer providing iframe presentation, direct download fallback,
+// Robust PDF previewer providing native object & iframe presentation, direct download gateway,
 // and informational placeholder when the document is still in pre-approval phase.
 // Renders responsively at all breakpoints (1440, 1024, 768, 390).
-// Utilizes Internal Document Gateway (/surat/requests/:id/preview-pdf/) to achieve
+// Prioritizes Internal Document Gateway (/surat/requests/:id/preview-pdf/) to achieve
 // 100% reliable local preview & download with zero Cloudinary 401 dependency.
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({
@@ -30,7 +30,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
     return null;
   }, [requestId]);
 
-  if (!pdfUrl) {
+  if (!pdfUrl && !resolvedId) {
     return (
       <div className="flex flex-col items-center justify-center p-8 sm:p-12 border-2 border-dashed border-slate-300 rounded-lg bg-slate-50/70 text-center tactile-card">
         <div className="w-12 h-12 bg-blue-50 text-blue-700 rounded-full flex items-center justify-center mb-3.5 border border-blue-200">
@@ -92,13 +92,35 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
         </div>
       </div>
 
-      {/* PDF Viewport */}
-      <div className="relative w-full h-[500px] sm:h-[620px] bg-slate-100">
-        <iframe
-          src={previewUrl}
-          title="Preview Dokumen Surat Resmi"
-          className="w-full h-full border-0"
-        />
+      {/* PDF Viewport with Object & Iframe Multi-Tier Fallback */}
+      <div className="relative w-full h-[580px] sm:h-[720px] bg-slate-100">
+        <object
+          data={previewUrl}
+          type="application/pdf"
+          className="w-full h-full"
+        >
+          <iframe
+            src={previewUrl}
+            title="Preview Dokumen Surat Resmi"
+            className="w-full h-full border-0"
+          >
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-50">
+              <FileText className="w-12 h-12 text-slate-400 mb-3" />
+              <p className="text-xs text-slate-600 mb-3 max-w-sm">
+                Peramban Anda belum mendukung rendering PDF langsung pada bingkai ini.
+                Silakan unduh atau buka berkas melalui tautan di bawah.
+              </p>
+              <a
+                href={downloadUrl}
+                download
+                className="inline-flex items-center px-4 py-2 text-xs font-semibold text-white bg-slate-900 rounded hover:bg-slate-800 shadow-xs"
+              >
+                <Download className="w-4 h-4 mr-1.5" />
+                Unduh Berkas PDF Resmi
+              </a>
+            </div>
+          </iframe>
+        </object>
       </div>
     </div>
   );

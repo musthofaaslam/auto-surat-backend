@@ -128,14 +128,75 @@
     </div>
 
     <!-- JUDUL / JENIS SURAT OTOMATIS -->
-    <div style="text-align: center; margin: 20px 0; font-weight: bold; text-transform: uppercase;">
-        <u>{{ nama_surat }}</u>
+    <div style="text-align: center; margin: 16px 0; font-weight: bold; text-transform: uppercase;">
+        <h3 style="margin: 0; text-decoration: underline; font-size: 13pt;">{{ nama_surat }}</h3>
+        <p style="margin: 3px 0 0 0; font-size: 11pt; font-weight: normal;">Nomor: {{ nomor_surat }}</p>
     </div>
+
+    <!-- IDENTITAS PIHAK 1 (PEJABAT PENANDATANGAN) -->
+    <p style="margin: 8px 0 4px 0; font-size: 11.5pt;">Yang bertandatangan di bawah ini:</p>
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 11.5pt;">
+        <tr>
+            <td style="width: 160px; padding: 2px 0;">Nama</td>
+            <td style="width: 15px; padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;"><b>{{ nama_penandatangan|default:signer_nama|default:"Dr. Joel Evans, M.T." }}</b></td>
+        </tr>
+        <tr>
+            <td style="padding: 2px 0;">NIP</td>
+            <td style="padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;">{{ nip_penandatangan|default:signer_nip|default:"198001012005011001" }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 2px 0;">Jabatan</td>
+            <td style="padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;">{{ jabatan_penandatangan|default:signer_jabatan|default:"Dekan Fakultas" }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 2px 0;">Instansi</td>
+            <td style="padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;">Universitas Indonesia Emas</td>
+        </tr>
+    </table>
+
+    <!-- IDENTITAS PIHAK 2 (MAHASISWA PEMOHON) -->
+    <p style="margin: 8px 0 4px 0; font-size: 11.5pt;">Dengan ini menerangkan bahwa:</p>
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11.5pt;">
+        <tr>
+            <td style="width: 160px; padding: 2px 0;">Nama Mahasiswa</td>
+            <td style="width: 15px; padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;"><b>{{ nama_mahasiswa|default:student.user.nama }}</b></td>
+        </tr>
+        <tr>
+            <td style="padding: 2px 0;">NIM</td>
+            <td style="padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;">{{ nim|default:student.nim }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 2px 0;">Program Studi</td>
+            <td style="padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;">{{ program_studi|default:student.prodi.nama_prodi }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 2px 0;">Fakultas</td>
+            <td style="padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;">{{ nama_fakultas|default:student.fakultas.nama_fakultas }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 2px 0;">Semester / T.A.</td>
+            <td style="padding: 2px 0;">:</td>
+            <td style="padding: 2px 0;">{{ semester_aktif|default:"7" }} / {{ tahun_akademik|default:"2026/2027" }}</td>
+        </tr>
+    </table>
 
     <!-- ISI SURAT (HASIL RENDER HTML DARI AI) -->
     <div class="isi-surat">
         {{ final_approved_content|default:final_content|default:isi_surat|safe }}
     </div>
+
+    <!-- PENUTUP -->
+    <p style="margin-top: 12px; margin-bottom: 20px; text-indent: 36px; text-align: justify; font-size: 11.5pt;">
+        Demikian surat ini kami buat dengan sebenarnya untuk dapat dipergunakan sebagaimana mestinya.
+    </p>
 
     <!-- TANDA TANGAN & TTE DIGITAL -->
     <div class="ttd-container">

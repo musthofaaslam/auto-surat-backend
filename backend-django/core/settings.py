@@ -214,13 +214,6 @@ SPECTACULAR_SETTINGS = {
 #    `AGENT_MAX_REVISIONS`, `AGENT_TIMEOUT_SECONDS`) sebagai konstanta konfigurasi
 #    agar batas evaluasi Self-Reflection dan timeout jaringan dapat disesuaikan per environment
 #    tanpa memodifikasi kode sumber agen.
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY', '')
-GEMINI_MODEL_NAME = os.environ.get('GEMINI_MODEL_NAME', 'gemini-3.1-flash-lite')
-AGENT_CRITIQUE_MIN_SCORE = int(os.environ.get('AGENT_CRITIQUE_MIN_SCORE', '8'))
-AGENT_MAX_REVISIONS = int(os.environ.get('AGENT_MAX_REVISIONS', '1'))
-AGENT_TIMEOUT_SECONDS = float(os.environ.get('AGENT_TIMEOUT_SECONDS', '30.0'))
-REQUIRED_FIELD_SURAT_PATH = BASE_DIR / 'required_field_surat.json' 
-
 def _load_live_env_var(key: str, default: str = "") -> str:
     env_candidates = [
         BASE_DIR / ".env",
@@ -240,6 +233,13 @@ def _load_live_env_var(key: str, default: str = "") -> str:
             except Exception:
                 pass
     return os.environ.get(key, default).strip()
+
+GEMINI_API_KEY = _load_live_env_var('GEMINI_API_KEY') or _load_live_env_var('GOOGLE_API_KEY', '')
+GEMINI_MODEL_NAME = _load_live_env_var('GEMINI_MODEL_NAME', 'gemini-3.5-flash-lite')
+AGENT_CRITIQUE_MIN_SCORE = int(_load_live_env_var('AGENT_CRITIQUE_MIN_SCORE', '8'))
+AGENT_MAX_REVISIONS = int(_load_live_env_var('AGENT_MAX_REVISIONS', '1'))
+AGENT_TIMEOUT_SECONDS = float(_load_live_env_var('AGENT_TIMEOUT_SECONDS', '30.0'))
+REQUIRED_FIELD_SURAT_PATH = BASE_DIR / 'required_field_surat.json' 
 
 BREVO_API_KEY = _load_live_env_var('BREVO_API_KEY')
 RESEND_API_KEY = _load_live_env_var('RESEND_API_KEY')

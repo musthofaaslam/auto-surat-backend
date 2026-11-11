@@ -7,6 +7,8 @@ from django.conf import settings
 from django.db import close_old_connections, models
 from django.http import FileResponse, Http404
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.clickjacking import xframe_options_exempt
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, status
 from rest_framework.generics import ListAPIView, RetrieveAPIView
@@ -1247,6 +1249,7 @@ class SuratVerifyAPIView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+@method_decorator(xframe_options_exempt, name='dispatch')
 class SuratPreviewPdfAPIView(APIView):
     """
     Endpoint internal gateway untuk pratinjau dokumen PDF resmi (Zero-Cloudinary dependency).
@@ -1310,7 +1313,8 @@ class SuratPreviewPdfAPIView(APIView):
 
         response = FileResponse(open(found_path, "rb"), content_type="application/pdf")
         response["Content-Disposition"] = f'inline; filename="surat_{nomor_clean}.pdf"'
-        response["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers.pop("X-Frame-Options", None)
+        response["Content-Security-Policy"] = "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*"
         return response
 
 

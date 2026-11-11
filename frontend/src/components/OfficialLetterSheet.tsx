@@ -9,10 +9,16 @@ interface OfficialLetterSheetProps {
   onContentChange?: (val: string) => void;
 }
 
-// Architectural Note (Taste-Skill 2.5 - Product at True Size):
-// Renders the official academic letter in authentic Indonesian government/university
-// tata naskah dinas format. Includes formal institutional letterhead (kop surat),
-// hierarchical reference numbers, student credential table, and verified cryptographic TTE seal.
+// Architectural Note (Taste-Skill 2.5 - Authentic Official Letter):
+// Renders the official academic recommendation/letter in authentic Indonesian
+// two-party administrative structure matching national higher education standard:
+// 1. Formal Institutional Letterhead (Kop Surat) with double border rule.
+// 2. Document Title & Official Reference Number.
+// 3. Pihak 1 (Yang bertandatangan di bawah ini: Signing Official).
+// 4. Pihak 2 (Dengan ini menerangkan bahwa: Student Candidate).
+// 5. Official Narrative Recommendation Content.
+// 6. Formal Closing Statement.
+// 7. Verified TTE Digital Signature block with SHA-256 seal & QR Code.
 
 export const OfficialLetterSheet: React.FC<OfficialLetterSheetProps> = ({
   detail,
@@ -28,27 +34,20 @@ export const OfficialLetterSheet: React.FC<OfficialLetterSheetProps> = ({
   const activeSigner = detail.signatures && detail.signatures.length > 0 ? detail.signatures[0] : null;
 
   return (
-    <div className="official-letter-sheet p-8 sm:p-12 md:p-14 border border-slate-300 rounded-lg max-w-3xl mx-auto shadow-md relative overflow-hidden bg-white text-slate-900">
-      {/* Official Watermark / Subdued Institutional Crest */}
-      <div className="absolute inset-0 flex items-center justify-center opacity-[0.025] pointer-events-none select-none">
-        <div className="w-96 h-96 rounded-full border-12 border-slate-900 flex items-center justify-center font-bold text-6xl font-serif">
-          UNIVERSITAS
-        </div>
-      </div>
-
+    <div className="official-letter-sheet p-8 sm:p-12 md:p-14 border border-slate-300 rounded-lg max-w-3xl mx-auto shadow-md relative overflow-hidden bg-white text-slate-900 font-serif">
       {/* 1. KOP SURAT RESMI DINAS */}
-      <div className="text-center pb-4 relative">
+      <div className="text-center pb-3 relative">
         <div className="text-xs sm:text-sm font-semibold tracking-wider uppercase text-slate-800 font-sans">
           Kementerian Pendidikan Tinggi, Sains, dan Teknologi
         </div>
         <div className="text-base sm:text-lg font-bold tracking-tight uppercase text-slate-900 font-sans mt-0.5">
-          Universitas Terbuka Indonesia
+          Universitas Indonesia Emas
         </div>
         <div className="text-xs sm:text-sm font-semibold tracking-wide uppercase text-slate-800 font-sans">
-          {detail.fakultas_mahasiswa || 'Fakultas Ilmu Komputer'}
+          FAKULTAS {(detail.fakultas_mahasiswa || 'Ilmu Komputer').toUpperCase()}
         </div>
         <div className="text-[11px] text-slate-600 font-sans mt-1">
-          Jl. Kampus Merdeka No. 1, Kota Akademik 14045 • Laman: https://kampus.example.ac.id
+          Jl. Kampus Utama No. 1, Semarang | Laman: www.uie.ac.id | Pos-el: info@uie.ac.id
         </div>
 
         {/* Double Border Rule (Thick top, Thin bottom) */}
@@ -58,134 +57,156 @@ export const OfficialLetterSheet: React.FC<OfficialLetterSheetProps> = ({
       </div>
 
       {/* 2. NOMOR & JUDUL SURAT */}
-      <div className="text-center my-6 space-y-1">
+      <div className="text-center my-5 space-y-1">
         <div className="text-sm sm:text-base font-bold uppercase tracking-wider underline text-slate-900">
-          {detail.nama_surat || 'SURAT KETERANGAN RESMI'}
+          {detail.nama_surat || 'SURAT REKOMENDASI MAGANG'}
         </div>
-        <div className="text-xs sm:text-sm font-mono text-slate-700">
-          Nomor: {detail.nomor_surat_resmi || `B/${detail.id}/UN.FK/${detail.kode_surat}/${new Date().getFullYear()}`}
+        <div className="text-xs sm:text-sm font-mono text-slate-800 font-medium">
+          Nomor: {detail.nomor_surat_resmi || `002/${detail.kode_surat || 'SR-MAG'}/FT/${new Date().getMonth() + 1}/${new Date().getFullYear()}`}
         </div>
       </div>
 
-      {/* 3. PARAGRAF PEMBUKA */}
-      <div className="text-xs sm:text-sm text-justify leading-relaxed text-slate-800 mb-4">
-        Yang bertanda tangan di bawah ini, Pimpinan {detail.fakultas_mahasiswa || 'Fakultas'} Universitas, menerangkan dengan sebenarnya bahwa:
+      {/* 3. PIHAK 1: YANG BERTANDATANGAN DI BAWAH INI */}
+      <div className="mt-4 mb-2 text-xs sm:text-sm text-slate-800 font-sans">
+        Yang bertandatangan di bawah ini:
       </div>
-
-      {/* 4. TABEL IDENTITAS MAHASISWA PEMOHON */}
-      <div className="my-4 px-2 sm:px-6">
+      <div className="mb-4 px-2 sm:px-4">
         <table className="w-full text-xs sm:text-sm font-serif">
           <tbody>
-            <tr className="border-b border-slate-100/60">
-              <td className="py-1.5 w-44 font-semibold text-slate-900">Nama Lengkap</td>
-              <td className="py-1.5 w-4 text-center">:</td>
-              <td className="py-1.5 font-bold text-slate-900">{detail.nama_mahasiswa}</td>
+            <tr>
+              <td className="py-1 w-40 text-slate-800">Nama</td>
+              <td className="py-1 w-4 text-center">:</td>
+              <td className="py-1 font-bold text-slate-900">
+                {activeSigner?.signer_name || 'Dr. Joel Evans, M.T.'}
+              </td>
             </tr>
-            <tr className="border-b border-slate-100/60">
-              <td className="py-1.5 font-semibold text-slate-900">Nomor Induk Mahasiswa (NIM)</td>
-              <td className="py-1.5 text-center">:</td>
-              <td className="py-1.5 font-mono font-medium text-slate-800">{detail.nim_mahasiswa}</td>
+            <tr>
+              <td className="py-1 text-slate-800">NIP</td>
+              <td className="py-1 text-center">:</td>
+              <td className="py-1 font-mono text-slate-800">
+                {activeSigner?.signer_nip || '198001012005011001'}
+              </td>
             </tr>
-            <tr className="border-b border-slate-100/60">
-              <td className="py-1.5 font-semibold text-slate-900">Program Studi</td>
-              <td className="py-1.5 text-center">:</td>
-              <td className="py-1.5 text-slate-800">{detail.prodi_mahasiswa}</td>
+            <tr>
+              <td className="py-1 text-slate-800">Jabatan</td>
+              <td className="py-1 text-center">:</td>
+              <td className="py-1 text-slate-800">
+                {activeSigner?.signer_role || 'Dekan Fakultas'}
+              </td>
             </tr>
-            <tr className="border-b border-slate-100/60">
-              <td className="py-1.5 font-semibold text-slate-900">Fakultas</td>
-              <td className="py-1.5 text-center">:</td>
-              <td className="py-1.5 text-slate-800">{detail.fakultas_mahasiswa}</td>
+            <tr>
+              <td className="py-1 text-slate-800">Instansi</td>
+              <td className="py-1 text-center">:</td>
+              <td className="py-1 text-slate-800">
+                Universitas Indonesia Emas
+              </td>
             </tr>
-            {detail.payload_data && Object.entries(detail.payload_data).slice(0, 3).map(([k, v]) => (
-              <tr key={k} className="border-b border-slate-100/60">
-                <td className="py-1.5 font-semibold text-slate-900 capitalize">
-                  {k.replace(/_/g, ' ')}
-                </td>
-                <td className="py-1.5 text-center">:</td>
-                <td className="py-1.5 text-slate-800">{v === null ? '-' : String(v)}</td>
-              </tr>
-            ))}
           </tbody>
         </table>
       </div>
 
-      {/* 5. ISI NASKAH SURAT DINAS (EDITABLE OR STATIC) */}
-      <div className="my-6">
+      {/* 4. PIHAK 2: DENGAN INI MENERANGKAN BAHWA */}
+      <div className="mt-3 mb-2 text-xs sm:text-sm text-slate-800 font-sans">
+        Dengan ini menerangkan bahwa:
+      </div>
+      <div className="mb-5 px-2 sm:px-4">
+        <table className="w-full text-xs sm:text-sm font-serif">
+          <tbody>
+            <tr>
+              <td className="py-1 w-40 text-slate-800">Nama Mahasiswa</td>
+              <td className="py-1 w-4 text-center">:</td>
+              <td className="py-1 font-bold text-slate-900">{detail.nama_mahasiswa}</td>
+            </tr>
+            <tr>
+              <td className="py-1 text-slate-800">NIM</td>
+              <td className="py-1 text-center">:</td>
+              <td className="py-1 font-mono font-medium text-slate-800">{detail.nim_mahasiswa}</td>
+            </tr>
+            <tr>
+              <td className="py-1 text-slate-800">Program Studi</td>
+              <td className="py-1 text-center">:</td>
+              <td className="py-1 text-slate-800">{detail.prodi_mahasiswa}</td>
+            </tr>
+            <tr>
+              <td className="py-1 text-slate-800">Fakultas</td>
+              <td className="py-1 text-center">:</td>
+              <td className="py-1 text-slate-800">{detail.fakultas_mahasiswa}</td>
+            </tr>
+            <tr>
+              <td className="py-1 text-slate-800">Semester / T.A.</td>
+              <td className="py-1 text-center">:</td>
+              <td className="py-1 text-slate-800">Semester 7 / 2026/2027</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* 5. ISI NASKAH SURAT REKOMENDASI (NARASI RESMI) */}
+      <div className="my-5">
         {isEditable ? (
           <div>
             <label className="block text-[11px] font-sans font-semibold text-slate-500 mb-1 uppercase tracking-wider">
-              Isi Naskah Draf (Dapat Diedit Dosen Peninjau):
+              Isi Narasi Draf Rekomendasi (Dapat Diedit Dosen Peninjau):
             </label>
             <textarea
               rows={8}
               value={content}
               onChange={(e) => onContentChange?.(e.target.value)}
               className="w-full p-3 font-serif text-xs sm:text-sm border border-slate-300 rounded bg-slate-50/50 focus:bg-white focus:ring-1 focus:ring-slate-900 leading-relaxed text-slate-900 text-justify"
-              placeholder="Ketik atau edit isi kalimat surat..."
+              placeholder="Ketik atau edit isi kalimat rekomendasi..."
             />
           </div>
         ) : (
-          <div className="text-xs sm:text-sm text-justify leading-relaxed whitespace-pre-wrap text-slate-800">
+          <div className="text-xs sm:text-sm text-justify leading-relaxed whitespace-pre-wrap text-slate-800 indent-7 space-y-2">
             {content || 'Isi naskah resmi sedang diproses oleh agen AI.'}
           </div>
         )}
       </div>
 
       {/* 6. PARAGRAF PENUTUP */}
-      <div className="text-xs sm:text-sm text-justify leading-relaxed text-slate-800 my-4">
-        Demikian surat keterangan ini diterbitkan secara sah untuk dipergunakan sebagaimana mestinya dengan penuh tanggung jawab.
+      <div className="text-xs sm:text-sm text-justify leading-relaxed text-slate-800 my-4 indent-7">
+        Demikian Surat Rekomendasi ini kami buat dengan sebenarnya untuk dapat dipergunakan sebagaimana mestinya.
       </div>
 
       {/* 7. KOLOM TANDA TANGAN ELEKTRONIK (TTE) */}
-      <div className="mt-10 pt-4 flex flex-col sm:flex-row items-end justify-between gap-6">
+      <div className="mt-8 pt-4 flex flex-col sm:flex-row items-end justify-between gap-6 border-t border-slate-100">
         <div className="w-full sm:w-auto text-left">
           {/* TTE QR & Security Verification Stamp */}
-          <div className="tte-digital-seal p-3 rounded-lg flex items-center space-x-3 text-emerald-900 max-w-xs">
-            <div className="w-12 h-12 bg-white rounded border border-emerald-300 flex items-center justify-center shrink-0 shadow-2xs">
-              <QrCode className="w-9 h-9 text-slate-800" />
-            </div>
-            <div className="text-[10px] font-sans leading-tight">
-              <div className="font-bold flex items-center text-emerald-800">
-                <ShieldCheck className="w-3 h-3 mr-1 text-emerald-600" />
-                <span>TERVERIFIKASI TTE</span>
-              </div>
-              <div className="text-slate-500 mt-0.5 font-mono text-[9px] truncate max-w-[170px]">
-                Token: {activeSigner?.token || detail.qr_verification_code || 'VERIF-AI-2026'}
-              </div>
-              <div className="text-slate-400 text-[9px] mt-0.5">
-                Pindai QR untuk uji keabsahan
-              </div>
-            </div>
+          <div className="border border-slate-400 bg-slate-50/80 p-3 rounded text-[9.5px] font-sans text-slate-700 max-w-xs leading-normal">
+            <strong className="block text-slate-900 text-[10px] mb-1 font-bold">
+              DOKUMEN DITANDATANGANI ELEKTRONIK (TTE)
+            </strong>
+            Surat ini sah dan diterbitkan resmi melalui Sistem Informasi AutoSurat.<br />
+            <span className="text-slate-500 font-mono text-[9px] mt-1 block truncate">
+              Verifikasi Keaslian: {activeSigner?.token || detail.qr_verification_code || detail.nomor_surat_resmi || 'VERIF-TTE-SHA256'}
+            </span>
           </div>
         </div>
 
-        <div className="w-full sm:w-64 text-center sm:text-right font-sans">
-          <div className="text-xs text-slate-600">
-            Kota Akademik,{' '}
+        <div className="w-full sm:w-64 text-center font-sans">
+          <div className="text-xs text-slate-700">
+            Semarang,{' '}
             {new Date(detail.created_at).toLocaleDateString('id-ID', {
               day: 'numeric',
               month: 'long',
               year: 'numeric',
             })}
           </div>
-          <div className="text-xs font-semibold text-slate-800 mt-1">
-            a.n. Dekan Fakultas,
-          </div>
-          <div className="text-xs text-slate-600">
-            Pejabat Berwenang / Koordinator
+          <div className="text-xs font-semibold text-slate-900 mt-0.5">
+            {activeSigner?.signer_role || 'Dekan Fakultas'},
           </div>
 
-          <div className="my-4 h-12 flex items-center justify-center sm:justify-end">
-            <span className="font-serif italic text-slate-400 text-xs select-none">
-              [Telah Ditandatangani Secara Elektronik]
-            </span>
+          <div className="my-2 h-16 flex items-center justify-center">
+            <div className="w-14 h-14 bg-white border border-slate-300 rounded flex items-center justify-center shadow-2xs">
+              <QrCode className="w-11 h-11 text-slate-800" />
+            </div>
           </div>
 
           <div className="text-xs font-bold text-slate-900 underline font-serif">
-            {activeSigner?.signer_name || 'Dr. Dosen Akademik, M.Kom.'}
+            {activeSigner?.signer_name || 'Dr. Joel Evans, M.T.'}
           </div>
-          <div className="text-[11px] font-mono text-slate-600">
-            NIP: {activeSigner?.signer_nip || '198001012005011001'}
+          <div className="text-[11px] font-mono text-slate-600 mt-0.5">
+            NIP. {activeSigner?.signer_nip || '198001012005011001'}
           </div>
         </div>
       </div>

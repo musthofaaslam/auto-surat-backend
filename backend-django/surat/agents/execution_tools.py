@@ -267,6 +267,15 @@ def _build_fallback_pdf_and_upload(context_data: Dict[str, Any]) -> str:
         <p>Nomor: {nomor_surat}</p>
     </div>
 
+    <p style="margin: 8px 0 4px 0; font-size: 11pt;">Yang bertandatangan di bawah ini:</p>
+    <table class="student-table" style="margin-bottom: 8px;">
+        <tr><td style="width: 150px;">Nama</td><td style="width: 15px;">:</td><td><b>{nama_pejabat}</b></td></tr>
+        <tr><td>NIP</td><td>:</td><td>{nip_pejabat}</td></tr>
+        <tr><td>Jabatan</td><td>:</td><td>{jabatan_pejabat}</td></tr>
+        <tr><td>Instansi</td><td>:</td><td>Universitas Indonesia Emas</td></tr>
+    </table>
+
+    <p style="margin: 8px 0 4px 0; font-size: 11pt;">Dengan ini menerangkan bahwa:</p>
     <table class="student-table">
         <tr><td style="width: 150px;">Nama Mahasiswa</td><td style="width: 15px;">:</td><td><b>{nama_mhs}</b></td></tr>
         <tr><td>NIM</td><td>:</td><td>{nim_mhs}</td></tr>
@@ -278,6 +287,10 @@ def _build_fallback_pdf_and_upload(context_data: Dict[str, Any]) -> str:
     <div class="content-body">
         {formatted_paragraphs}
     </div>
+
+    <p style="margin-top: 12px; margin-bottom: 16px; text-indent: 28px; text-align: justify; font-size: 11pt; line-height: 1.5;">
+        Demikian Surat Rekomendasi ini kami buat dengan sebenarnya untuk dapat dipergunakan sebagaimana mestinya.
+    </p>
 
     <div class="closing-block">
         <div class="tte-box">
@@ -483,6 +496,15 @@ class SuratExecutionTools:
             candidate = candidate[len("templates/"):]
         elif candidate.startswith("/templates/"):
             candidate = candidate[len("/templates/"):]
+
+        # Pemetaan otomatis bila field template_path di basis data kosong
+        if not candidate:
+            kode_obj = getattr(surat_request, "kode_surat", None)
+            kode_str = str(getattr(kode_obj, "kode_surat", "") or kode_obj or "").strip().upper()
+            if kode_str == "SR-MAG":
+                candidate = "surat/sr.mag.html"
+            elif kode_str == "SR-BEA":
+                candidate = "surat/sr.bea.html"
 
         if candidate:
             try:
